@@ -69,6 +69,28 @@ export const SessionSchema = z
       })
       .strict()
       .optional(),
+    writeLock: z
+      .object({
+        timeoutMs: z.number().int().positive().optional(),
+        backoffBaseMs: z.number().int().positive().optional(),
+        backoffCapMs: z.number().int().positive().optional(),
+        backoffJitterMs: z.number().int().nonnegative().optional(),
+      })
+      .strict()
+      .superRefine((val, ctx) => {
+        if (
+          typeof val.backoffBaseMs === "number" &&
+          typeof val.backoffCapMs === "number" &&
+          val.backoffCapMs < val.backoffBaseMs
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["backoffCapMs"],
+            message: "backoffCapMs must be greater than or equal to backoffBaseMs",
+          });
+        }
+      })
+      .optional(),
     maintenance: z
       .object({
         mode: z.enum(["enforce", "warn"]).optional(),
