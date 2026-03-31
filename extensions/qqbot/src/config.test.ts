@@ -1,10 +1,46 @@
+import fs from "node:fs";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { describe, expect, it } from "vitest";
+import { validateJsonSchemaValue } from "../../../src/plugins/schema-validator.js";
+import { qqbotPlugin } from "./channel.js";
 import { qqbotSetupPlugin } from "./channel.setup.js";
 import { QQBotConfigSchema } from "./config-schema.js";
 import { DEFAULT_ACCOUNT_ID, resolveQQBotAccount } from "./config.js";
 
 describe("qqbot config", () => {
+  it("accepts top-level speech overrides in the manifest schema", () => {
+    const manifest = JSON.parse(
+      fs.readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf-8"),
+    ) as { configSchema: Record<string, unknown> };
+
+    const result = validateJsonSchemaValue({
+      schema: manifest.configSchema,
+      cacheKey: "qqbot.manifest.speech-overrides",
+      value: {
+        tts: {
+          provider: "openai",
+          baseUrl: "https://example.com/v1",
+          apiKey: "tts-key",
+          model: "gpt-4o-mini-tts",
+          voice: "alloy",
+          authStyle: "api-key",
+          queryParams: {
+            format: "wav",
+          },
+          speed: 1.1,
+        },
+        stt: {
+          provider: "openai",
+          baseUrl: "https://example.com/v1",
+          apiKey: "stt-key",
+          model: "whisper-1",
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
   it("accepts SecretRef-backed credentials in the runtime schema", () => {
     const parsed = QQBotConfigSchema.safeParse({
       appId: "123456",
@@ -36,6 +72,21 @@ describe("qqbot config", () => {
     });
 
     expect(parsed.success).toBe(true);
+  });
+
+  it("rejects account-level speech overrides that runtime does not consume", () => {
+    const parsed = QQBotConfigSchema.safeParse({
+      accounts: {
+        bot2: {
+          appId: "654321",
+          tts: {
+            provider: "openai",
+          },
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(false);
   });
 
   it("preserves top-level media and upgrade config on the default account", () => {
@@ -147,5 +198,43 @@ describe("qqbot config", () => {
       appId: "102905186",
       clientSecret: "Oi2Mg1Mh2Ni3:Pl7TpBXuHe1OmAYwKi7W",
     });
+  });
+
+  it("rejects malformed --token consistently across setup paths", () => {
+    const runtimeSetup = qqbotPlugin.setup;
+    const lightweightSetup = qqbotSetupPlugin.setup;
+    expect(runtimeSetup).toBeDefined();
+    expect(lightweightSetup).toBeDefined();
+
+    const input = { token: "broken", name: "Bad" };
+
+    expect(
+      runtimeSetup!.validateInput?.({
+        cfg: {} as OpenClawConfig,
+        accountId: DEFAULT_ACCOUNT_ID,
+        input,
+      }),
+    ).toBe("QQBot --token must be in appId:clientSecret format");
+    expect(
+      lightweightSetup!.validateInput?.({
+        cfg: {} as OpenClawConfig,
+        accountId: DEFAULT_ACCOUNT_ID,
+        input,
+      }),
+    ).toBe("QQBot --token must be in appId:clientSecret format");
+    expect(
+      runtimeSetup!.applyAccountConfig?.({
+        cfg: {} as OpenClawConfig,
+        accountId: DEFAULT_ACCOUNT_ID,
+        input,
+      }),
+    ).toEqual({});
+    expect(
+      lightweightSetup!.applyAccountConfig?.({
+        cfg: {} as OpenClawConfig,
+        accountId: DEFAULT_ACCOUNT_ID,
+        input,
+      }),
+    ).toEqual({});
   });
 });
