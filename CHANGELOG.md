@@ -32,6 +32,7 @@ Docs: https://docs.openclaw.ai
 - Slack/exec approvals: add native Slack approval routing and approver authorization so exec approval prompts can stay in Slack instead of falling back to the Web UI or terminal. Thanks @vincentkoc.
 
 ### Fixes
+
 - Image generation/build: write stable runtime alias files into `dist/` and route provider-auth runtime lookups through those aliases so image-generation providers keep resolving auth/runtime modules after rebuilds instead of crashing on missing hashed chunk files.
 - Config/runtime: pin the first successful config load in memory for the running process and refresh that snapshot on successful writes/reloads, so hot paths stop reparsing `openclaw.json` between watcher-driven swaps.
 - Config/legacy cleanup: stop probing obsolete alternate legacy config names and service labels during local config/service detection, while keeping the active `~/.openclaw/openclaw.json` path canonical.
@@ -133,6 +134,7 @@ Docs: https://docs.openclaw.ai
 - Config/SecretRef + Control UI: harden SecretRef redaction round-trip restore, block unsafe raw fallback (force Form mode when raw is unavailable), and preflight submitted-config SecretRefs before config write RPC persistence. (#58044) Thanks @joshavant.
 - Config/Telegram: migrate removed `channels.telegram.groupMentionsOnly` into `channels.telegram.groups["*"].requireMention` on load so legacy configs no longer crash at startup. (#55336) thanks @jameslcowan.
 - Gateway/SecretRef: resolve restart token drift checks with merged service/runtime env sources and hard-fail unsupported mutable SecretRef plus OAuth-profile combinations so restart warnings and policy enforcement match runtime behavior. (#58141) Thanks @joshavant.
+- Media/images: reject oversized decoded image inputs before metadata and resize backends run, so tiny compressed image bombs fail early instead of exhausting gateway memory. (#58226) Thanks @AntAISecurityLab and @vincentkoc.
 
 ## 2026.3.28
 
