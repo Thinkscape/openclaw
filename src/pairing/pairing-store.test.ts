@@ -359,6 +359,51 @@ describe("pairing store", () => {
         });
       },
     },
+    {
+      name: "counts legacy default-account pending requests before admitting a new one",
+      run: async () => {
+        await withTempStateDir(async (stateDir) => {
+          const createdAt = new Date().toISOString();
+          await writeJsonFixture(resolvePairingFilePath(stateDir, "demo-pairing-c"), {
+            version: 1,
+            requests: [
+              {
+                id: "+15550000001",
+                code: "AAAAAAAB",
+                createdAt,
+                lastSeenAt: createdAt,
+              },
+              {
+                id: "+15550000002",
+                code: "AAAAAAAC",
+                createdAt,
+                lastSeenAt: createdAt,
+              },
+              {
+                id: "+15550000003",
+                code: "AAAAAAAD",
+                createdAt,
+                lastSeenAt: createdAt,
+              },
+            ],
+          });
+
+          const blocked = await upsertChannelPairingRequest({
+            channel: "demo-pairing-c",
+            id: "+15550000004",
+            accountId: DEFAULT_ACCOUNT_ID,
+          });
+          expect(blocked.created).toBe(false);
+
+          const list = await listChannelPairingRequests("demo-pairing-c");
+          expect(list.map((entry) => entry.id)).toEqual([
+            "+15550000001",
+            "+15550000002",
+            "+15550000003",
+          ]);
+        });
+      },
+    },
   ] as const)("$name", async ({ run }) => {
     await expectPairingRequestStateCase({ run });
   });

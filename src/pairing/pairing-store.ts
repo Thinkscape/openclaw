@@ -261,11 +261,7 @@ function requestMatchesAccountId(entry: PairingRequest, normalizedAccountId: str
   if (!normalizedAccountId) {
     return true;
   }
-  return (
-    String(entry.meta?.accountId ?? "")
-      .trim()
-      .toLowerCase() === normalizedAccountId
-  );
+  return resolvePairingRequestAccountId(entry) === normalizedAccountId;
 }
 
 function shouldIncludeLegacyAllowFromEntries(normalizedAccountId: string): boolean {
