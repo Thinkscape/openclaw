@@ -573,6 +573,38 @@ describe("pairing store", () => {
         });
       },
     },
+    {
+      name: "does not block a new account when other accounts already filled their own pending slots",
+      run: async () => {
+        await withTempStateDir(async () => {
+          for (const accountId of ["alpha", "beta", "gamma"]) {
+            const created = await upsertChannelPairingRequest({
+              channel: "telegram",
+              accountId,
+              id: `pending-${accountId}`,
+            });
+            expect(created.created).toBe(true);
+          }
+
+          const delta = await upsertChannelPairingRequest({
+            channel: "telegram",
+            accountId: "delta",
+            id: "pending-delta",
+          });
+          expect(delta.created).toBe(true);
+
+          const deltaList = await listChannelPairingRequests("telegram", process.env, "delta");
+          const allPending = await listChannelPairingRequests("telegram");
+          expect(deltaList.map((entry) => entry.id)).toEqual(["pending-delta"]);
+          expect(allPending.map((entry) => entry.id)).toEqual([
+            "pending-alpha",
+            "pending-beta",
+            "pending-gamma",
+            "pending-delta",
+          ]);
+        });
+      },
+    },
   ] as const)("$name", async ({ run }) => {
     await expectPairingRequestStateCase({ run });
   });
