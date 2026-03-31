@@ -261,6 +261,8 @@ describe("sanitizeHostExecEnv", () => {
         GONOSUMCHECK: "example.invalid/*",
         GONOSUMDB: "example.invalid/*",
         GONOPROXY: "example.invalid/*",
+        GOPRIVATE: "example.invalid/*",
+        GOENV: "/tmp/evil-goenv",
         GOPATH: "/tmp/evil-go",
         PYTHONUSERBASE: "/tmp/evil-python-userbase",
         VIRTUAL_ENV: "/tmp/evil-venv",
@@ -326,6 +328,8 @@ describe("sanitizeHostExecEnv", () => {
     expect(env.GONOSUMCHECK).toBeUndefined();
     expect(env.GONOSUMDB).toBeUndefined();
     expect(env.GONOPROXY).toBeUndefined();
+    expect(env.GOPRIVATE).toBeUndefined();
+    expect(env.GOENV).toBeUndefined();
     expect(env.GOPATH).toBeUndefined();
     expect(env.PYTHONUSERBASE).toBeUndefined();
     expect(env.VIRTUAL_ENV).toBeUndefined();
@@ -436,6 +440,8 @@ describe("isDangerousHostEnvOverrideVarName", () => {
     expect(isDangerousHostEnvOverrideVarName("c_include_path")).toBe(true);
     expect(isDangerousHostEnvOverrideVarName("GOPROXY")).toBe(true);
     expect(isDangerousHostEnvOverrideVarName("gonosumdb")).toBe(true);
+    expect(isDangerousHostEnvOverrideVarName("GOPRIVATE")).toBe(true);
+    expect(isDangerousHostEnvOverrideVarName("goenv")).toBe(true);
     expect(isDangerousHostEnvOverrideVarName("PYTHONUSERBASE")).toBe(true);
     expect(isDangerousHostEnvOverrideVarName("virtual_env")).toBe(true);
     expect(isDangerousHostEnvOverrideVarName("CLASSPATH")).toBe(true);
@@ -492,6 +498,8 @@ describe("sanitizeHostExecEnvWithDiagnostics", () => {
         GONOSUMCHECK: "example.invalid/*",
         GONOSUMDB: "example.invalid/*",
         GONOPROXY: "example.invalid/*",
+        GOPRIVATE: "example.invalid/*",
+        GOENV: "/tmp/evil-goenv",
         GOPATH: "/tmp/evil-go",
         PYTHONUSERBASE: "/tmp/evil-python-userbase",
         VIRTUAL_ENV: "/tmp/evil-venv",
@@ -512,10 +520,12 @@ describe("sanitizeHostExecEnvWithDiagnostics", () => {
       "DOCKER_CONTEXT",
       "DOCKER_HOST",
       "DOCKER_TLS_VERIFY",
+      "GOENV",
       "GONOPROXY",
       "GONOSUMCHECK",
       "GONOSUMDB",
       "GOPATH",
+      "GOPRIVATE",
       "GOPROXY",
       "LIBRARY_PATH",
       "NODE_EXTRA_CA_CERTS",
@@ -571,6 +581,8 @@ describe("sanitizeHostExecEnvWithDiagnostics", () => {
     expect(result.env.GONOSUMCHECK).toBeUndefined();
     expect(result.env.GONOSUMDB).toBeUndefined();
     expect(result.env.GONOPROXY).toBeUndefined();
+    expect(result.env.GOPRIVATE).toBeUndefined();
+    expect(result.env.GOENV).toBeUndefined();
     expect(result.env.GOPATH).toBeUndefined();
     expect(result.env.PYTHONUSERBASE).toBeUndefined();
     expect(result.env.VIRTUAL_ENV).toBeUndefined();

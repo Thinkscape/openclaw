@@ -110,6 +110,8 @@ enum HostEnvSecurityPolicy {
         "GONOSUMCHECK",
         "GONOSUMDB",
         "GONOPROXY",
+        "GOPRIVATE",
+        "GOENV",
         "GOPATH",
         "PYTHONUSERBASE",
         "VIRTUAL_ENV",
