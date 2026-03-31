@@ -237,4 +237,44 @@ describe("qqbot config", () => {
       }),
     ).toEqual({});
   });
+
+  it("preserves the --use-env add flow across setup paths", () => {
+    const runtimeSetup = qqbotPlugin.setup;
+    const lightweightSetup = qqbotSetupPlugin.setup;
+    expect(runtimeSetup).toBeDefined();
+    expect(lightweightSetup).toBeDefined();
+
+    const input = { useEnv: true, name: "Env Bot" };
+
+    expect(
+      runtimeSetup!.applyAccountConfig?.({
+        cfg: {} as OpenClawConfig,
+        accountId: DEFAULT_ACCOUNT_ID,
+        input,
+      }),
+    ).toMatchObject({
+      channels: {
+        qqbot: {
+          enabled: true,
+          allowFrom: ["*"],
+          name: "Env Bot",
+        },
+      },
+    });
+    expect(
+      lightweightSetup!.applyAccountConfig?.({
+        cfg: {} as OpenClawConfig,
+        accountId: DEFAULT_ACCOUNT_ID,
+        input,
+      }),
+    ).toMatchObject({
+      channels: {
+        qqbot: {
+          enabled: true,
+          allowFrom: ["*"],
+          name: "Env Bot",
+        },
+      },
+    });
+  });
 });

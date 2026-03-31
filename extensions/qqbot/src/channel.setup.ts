@@ -62,7 +62,7 @@ export function applyQQBotSetupAccountConfig(params: {
     clientSecret = parsed.clientSecret;
   }
 
-  if (!appId && !params.input.tokenFile) {
+  if (!appId && !params.input.tokenFile && !params.input.useEnv) {
     return params.cfg;
   }
 
