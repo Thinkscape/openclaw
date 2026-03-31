@@ -174,6 +174,16 @@ describe("isDangerousHostEnvVarName", () => {
     expect(isDangerousHostEnvVarName("gradle_opts")).toBe(true);
     expect(isDangerousHostEnvVarName("ANT_OPTS")).toBe(true);
     expect(isDangerousHostEnvVarName("ant_opts")).toBe(true);
+    expect(isDangerousHostEnvVarName("HTTPS_PROXY")).toBe(true);
+    expect(isDangerousHostEnvVarName("https_proxy")).toBe(true);
+    expect(isDangerousHostEnvVarName("ALL_PROXY")).toBe(true);
+    expect(isDangerousHostEnvVarName("no_proxy")).toBe(true);
+    expect(isDangerousHostEnvVarName("NODE_TLS_REJECT_UNAUTHORIZED")).toBe(true);
+    expect(isDangerousHostEnvVarName("node_extra_ca_certs")).toBe(true);
+    expect(isDangerousHostEnvVarName("SSL_CERT_FILE")).toBe(true);
+    expect(isDangerousHostEnvVarName("requests_ca_bundle")).toBe(true);
+    expect(isDangerousHostEnvVarName("DOCKER_HOST")).toBe(true);
+    expect(isDangerousHostEnvVarName("docker_cert_path")).toBe(true);
     expect(isDangerousHostEnvVarName("AWS_CONFIG_FILE")).toBe(false);
     expect(isDangerousHostEnvVarName("aws_config_file")).toBe(false);
     expect(isDangerousHostEnvVarName("PATH")).toBe(false);
@@ -408,6 +418,9 @@ describe("sanitizeHostExecEnvWithDiagnostics", () => {
         UV_INDEX_URL: "https://example.invalid/simple",
         UV_DEFAULT_INDEX: "https://example.invalid/simple",
         UV_EXTRA_INDEX_URL: "https://example.invalid/simple",
+        HTTPS_PROXY: "http://proxy.example.test:8080",
+        NODE_TLS_REJECT_UNAUTHORIZED: "0",
+        DOCKER_HOST: "tcp://docker.example.test:2375",
         SAFE_KEY: "ok",
         "BAD-KEY": "bad",
       },
@@ -417,6 +430,9 @@ describe("sanitizeHostExecEnvWithDiagnostics", () => {
       "CLASSPATH",
       "CMAKE_C_COMPILER",
       "CXX",
+      "DOCKER_HOST",
+      "HTTPS_PROXY",
+      "NODE_TLS_REJECT_UNAUTHORIZED",
       "PATH",
       "PIP_EXTRA_INDEX_URL",
       "PIP_INDEX_URL",
@@ -439,6 +455,9 @@ describe("sanitizeHostExecEnvWithDiagnostics", () => {
     expect(result.env.UV_INDEX_URL).toBeUndefined();
     expect(result.env.UV_DEFAULT_INDEX).toBeUndefined();
     expect(result.env.UV_EXTRA_INDEX_URL).toBeUndefined();
+    expect(result.env.HTTPS_PROXY).toBeUndefined();
+    expect(result.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined();
+    expect(result.env.DOCKER_HOST).toBeUndefined();
   });
 
   it("allows Windows-style override names while still rejecting invalid keys", () => {
