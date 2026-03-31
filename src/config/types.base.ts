@@ -132,8 +132,21 @@ export type SessionConfig = {
   };
   /** Shared defaults for thread-bound session routing across channels/providers. */
   threadBindings?: SessionThreadBindingsConfig;
+  /** Session write-lock contention behavior and timeout tuning. */
+  writeLock?: SessionWriteLockConfig;
   /** Automatic session store maintenance (pruning, capping, file rotation). */
   maintenance?: SessionMaintenanceConfig;
+};
+
+export type SessionWriteLockConfig = {
+  /** Default lock acquisition timeout in milliseconds when callers do not specify one. Default: 10000. */
+  timeoutMs?: number;
+  /** Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50. */
+  backoffBaseMs?: number;
+  /** Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000. */
+  backoffCapMs?: number;
+  /** Optional additive random jitter in milliseconds for contended lock retries. Default: 0. */
+  backoffJitterMs?: number;
 };
 
 export type SessionMaintenanceMode = "enforce" | "warn";
