@@ -1,6 +1,7 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { loadConfig, type OpenClawConfig } from "../config/config.js";
 import { getProcessStartTime, isPidAlive } from "../shared/pid-alive.js";
 import { resolveProcessScopedMap } from "../shared/process-scoped-map.js";
 
@@ -45,6 +46,10 @@ const DEFAULT_STALE_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_HOLD_MS = 5 * 60 * 1000;
 const DEFAULT_WATCHDOG_INTERVAL_MS = 60_000;
 const DEFAULT_TIMEOUT_GRACE_MS = 2 * 60 * 1000;
+const DEFAULT_SESSION_LOCK_TIMEOUT_MS = 10_000;
+const DEFAULT_SESSION_LOCK_BACKOFF_BASE_MS = 50;
+const DEFAULT_SESSION_LOCK_BACKOFF_CAP_MS = 1_000;
+const DEFAULT_SESSION_LOCK_BACKOFF_JITTER_MS = 0;
 const MAX_LOCK_HOLD_MS = 2_147_000_000;
 
 type CleanupState = {
@@ -108,6 +113,50 @@ function resolvePositiveMs(
     return fallback;
   }
   return value;
+}
+
+type ResolvedSessionWriteLockConfig = {
+  timeoutMs: number;
+  backoffBaseMs: number;
+  backoffCapMs: number;
+  backoffJitterMs: number;
+};
+
+export function resolveSessionWriteLockConfig(
+  cfg?: Pick<OpenClawConfig, "session"> | undefined,
+): ResolvedSessionWriteLockConfig {
+  const writeLock = cfg?.session?.writeLock;
+  const backoffBaseMs = resolvePositiveMs(
+    writeLock?.backoffBaseMs,
+    DEFAULT_SESSION_LOCK_BACKOFF_BASE_MS,
+  );
+  const backoffCapMs = Math.max(
+    backoffBaseMs,
+    resolvePositiveMs(writeLock?.backoffCapMs, DEFAULT_SESSION_LOCK_BACKOFF_CAP_MS),
+  );
+  const backoffJitterMsRaw = writeLock?.backoffJitterMs;
+  const backoffJitterMs =
+    typeof backoffJitterMsRaw === "number" &&
+    Number.isFinite(backoffJitterMsRaw) &&
+    backoffJitterMsRaw >= 0
+      ? Math.floor(backoffJitterMsRaw)
+      : DEFAULT_SESSION_LOCK_BACKOFF_JITTER_MS;
+  return {
+    timeoutMs: resolvePositiveMs(writeLock?.timeoutMs, DEFAULT_SESSION_LOCK_TIMEOUT_MS, {
+      allowInfinity: true,
+    }),
+    backoffBaseMs,
+    backoffCapMs,
+    backoffJitterMs,
+  };
+}
+
+function readSessionWriteLockConfig(): ResolvedSessionWriteLockConfig {
+  try {
+    return resolveSessionWriteLockConfig(loadConfig());
+  } catch {
+    return resolveSessionWriteLockConfig();
+  }
 }
 
 export function resolveSessionLockMaxHoldFromTimeout(params: {
@@ -475,7 +524,10 @@ export async function acquireSessionWriteLock(params: {
   release: () => Promise<void>;
 }> {
   registerCleanupHandlers();
-  const timeoutMs = resolvePositiveMs(params.timeoutMs, 10_000, { allowInfinity: true });
+  const configuredLock = readSessionWriteLockConfig();
+  const timeoutMs = resolvePositiveMs(params.timeoutMs, configuredLock.timeoutMs, {
+    allowInfinity: true,
+  });
   const staleMs = resolvePositiveMs(params.staleMs, DEFAULT_STALE_MS);
   const maxHoldMs = resolvePositiveMs(params.maxHoldMs, DEFAULT_MAX_HOLD_MS);
   const sessionFile = path.resolve(params.sessionFile);
@@ -566,7 +618,11 @@ export async function acquireSessionWriteLock(params: {
         continue;
       }
 
-      const delay = Math.min(1000, 50 * attempt);
+      const delay =
+        Math.min(configuredLock.backoffCapMs, configuredLock.backoffBaseMs * attempt) +
+        (configuredLock.backoffJitterMs > 0
+          ? Math.floor(Math.random() * configuredLock.backoffJitterMs)
+          : 0);
       await new Promise((r) => setTimeout(r, delay));
     }
   }
