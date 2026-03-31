@@ -179,6 +179,14 @@ describe("unwrapKnownDispatchWrapperInvocation", () => {
       },
     },
     {
+      argv: ["sandbox-exec", "-D", "PROFILE", "bash", "-lc", "echo hi"],
+      expected: {
+        kind: "unwrapped",
+        wrapper: "sandbox-exec",
+        argv: ["bash", "-lc", "echo hi"],
+      },
+    },
+    {
       argv: ["script", "-q", "/dev/null"],
       expected: { kind: "blocked", wrapper: "script" },
     },
@@ -232,6 +240,11 @@ describe("resolveDispatchWrapperTrustPlan", () => {
     },
     {
       argv: ["sandbox-exec", "-p", "(allow default)", "bash", "-lc", "echo hi"],
+      wrapper: "sandbox-exec",
+      effectiveArgv: ["bash", "-lc", "echo hi"],
+    },
+    {
+      argv: ["sandbox-exec", "-D", "PROFILE", "bash", "-lc", "echo hi"],
       wrapper: "sandbox-exec",
       effectiveArgv: ["bash", "-lc", "echo hi"],
     },

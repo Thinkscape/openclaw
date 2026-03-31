@@ -45,7 +45,7 @@ const TIME_FLAG_OPTIONS = new Set([
 const TIME_OPTIONS_WITH_VALUE = new Set(["-f", "--format", "-o", "--output"]);
 const BSD_SCRIPT_FLAG_OPTIONS = new Set(["-a", "-d", "-k", "-p", "-q", "-r"]);
 const BSD_SCRIPT_OPTIONS_WITH_VALUE = new Set(["-F", "-t"]);
-const SANDBOX_EXEC_OPTIONS_WITH_VALUE = new Set(["-f", "-p", "-D"]);
+const SANDBOX_EXEC_OPTIONS_WITH_VALUE = new Set(["-f", "-p", "-d"]);
 const TIMEOUT_FLAG_OPTIONS = new Set(["--foreground", "--preserve-status", "-v", "--verbose"]);
 const TIMEOUT_OPTIONS_WITH_VALUE = new Set(["-k", "--kill-after", "-s", "--signal"]);
 
