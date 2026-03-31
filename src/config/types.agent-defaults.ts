@@ -225,6 +225,11 @@ export type AgentDefaultsConfig = {
     thinking?: string;
     /** Default run timeout in seconds for spawned sub-agents (0 = no timeout). */
     runTimeoutSeconds?: number;
+    /**
+     * Internal gateway timeout in milliseconds for sub-agent spawn self-calls
+     * (sessions.patch / agent / sessions.delete). Default: 10000.
+     */
+    gatewayTimeoutMs?: number;
     /** Gateway timeout in ms for sub-agent announce delivery calls (default: 90000). */
     announceTimeoutMs?: number;
     /** Require explicit agentId in sessions_spawn (no default same-as-caller). Default: false. */
