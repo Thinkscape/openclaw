@@ -19162,6 +19162,32 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
             description:
               "Shared defaults for thread-bound session routing behavior across providers that support thread focus workflows. Configure global defaults here and override per channel only when behavior differs.",
           },
+          writeLock: {
+            type: "object",
+            properties: {
+              timeoutMs: {
+                type: "integer",
+                exclusiveMinimum: 0,
+                maximum: 9007199254740991,
+              },
+              backoffBaseMs: {
+                type: "integer",
+                exclusiveMinimum: 0,
+                maximum: 9007199254740991,
+              },
+              backoffCapMs: {
+                type: "integer",
+                exclusiveMinimum: 0,
+                maximum: 9007199254740991,
+              },
+              backoffJitterMs: {
+                type: "integer",
+                minimum: 0,
+                maximum: 9007199254740991,
+              },
+            },
+            additionalProperties: false,
+          },
           maintenance: {
             type: "object",
             properties: {
@@ -25590,6 +25616,31 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "Thread Binding Max Age (hours)",
       help: "Optional hard max age in hours for thread-bound sessions across providers/channels (0 disables hard cap). Default: 0.",
       tags: ["performance", "storage"],
+    },
+    "session.writeLock": {
+      label: "Session Write Lock",
+      help: "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
+      tags: ["storage"],
+    },
+    "session.writeLock.timeoutMs": {
+      label: "Session Write Lock Timeout (ms)",
+      help: "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
+      tags: ["performance", "storage"],
+    },
+    "session.writeLock.backoffBaseMs": {
+      label: "Session Write Lock Backoff Base (ms)",
+      help: "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
+      tags: ["reliability", "storage"],
+    },
+    "session.writeLock.backoffCapMs": {
+      label: "Session Write Lock Backoff Cap (ms)",
+      help: "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
+      tags: ["reliability", "storage"],
+    },
+    "session.writeLock.backoffJitterMs": {
+      label: "Session Write Lock Backoff Jitter (ms)",
+      help: "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
+      tags: ["reliability", "storage"],
     },
     "session.maintenance": {
       label: "Session Maintenance",
