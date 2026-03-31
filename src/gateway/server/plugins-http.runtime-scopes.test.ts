@@ -27,7 +27,6 @@ function createRoute(params: {
   };
 }
 
-<<<<<<< HEAD
 function createMockLogger(): SubsystemLogger {
   const logger = {
     subsystem: "test/plugins-http-runtime-scopes",
