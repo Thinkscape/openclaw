@@ -3,6 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
+import { createJpegBufferWithDimensions, createPngBufferWithDimensions } from "./test-helpers.js";
 
 let loadWebMedia: typeof import("./web-media.js").loadWebMedia;
 
@@ -10,29 +11,19 @@ const TINY_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/woAAn8B9FD5fHAAAAAASUVORK5CYII=";
 
 let fixtureRoot = "";
+let oversizedJpegFile = "";
 let tinyPngFile = "";
-
-function createOversizedPngBuffer(params: { width: number; height: number }): Buffer {
-  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  const ihdrLength = Buffer.from([0x00, 0x00, 0x00, 0x0d]);
-  const ihdrType = Buffer.from("IHDR", "ascii");
-  const ihdrData = Buffer.alloc(13);
-  ihdrData.writeUInt32BE(params.width, 0);
-  ihdrData.writeUInt32BE(params.height, 4);
-  ihdrData[8] = 8;
-  ihdrData[9] = 6;
-  const ihdrCrc = Buffer.alloc(4);
-  const iend = Buffer.from([
-    0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
-  ]);
-  return Buffer.concat([signature, ihdrLength, ihdrType, ihdrData, ihdrCrc, iend]);
-}
 
 beforeAll(async () => {
   ({ loadWebMedia } = await import("./web-media.js"));
   fixtureRoot = await fs.mkdtemp(path.join(resolvePreferredOpenClawTmpDir(), "web-media-core-"));
   tinyPngFile = path.join(fixtureRoot, "tiny.png");
+  oversizedJpegFile = path.join(fixtureRoot, "oversized.jpg");
   await fs.writeFile(tinyPngFile, Buffer.from(TINY_PNG_BASE64, "base64"));
+  await fs.writeFile(
+    oversizedJpegFile,
+    createJpegBufferWithDimensions({ width: 6_000, height: 5_000 }),
+  );
 });
 
 afterAll(async () => {
@@ -106,9 +97,18 @@ describe("loadWebMedia", () => {
 
   it("rejects oversized pixel-count images before decode/resize backends run", async () => {
     const oversizedPngFile = path.join(fixtureRoot, "oversized.png");
-    await fs.writeFile(oversizedPngFile, createOversizedPngBuffer({ width: 8_000, height: 4_000 }));
+    await fs.writeFile(
+      oversizedPngFile,
+      createPngBufferWithDimensions({ width: 8_000, height: 4_000 }),
+    );
 
     await expect(loadWebMedia(oversizedPngFile, createLocalWebMediaOptions())).rejects.toThrow(
+      /pixel input limit/i,
+    );
+  });
+
+  it("preserves pixel-limit errors for oversized JPEG optimization", async () => {
+    await expect(loadWebMedia(oversizedJpegFile, createLocalWebMediaOptions())).rejects.toThrow(
       /pixel input limit/i,
     );
   });

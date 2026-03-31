@@ -174,6 +174,10 @@ function countImagePixels(meta: ImageMetadata): number | null {
   return Number.isSafeInteger(pixels) ? pixels : null;
 }
 
+function exceedsImagePixelLimit(meta: ImageMetadata): boolean {
+  return meta.width > Math.floor(MAX_IMAGE_INPUT_PIXELS / meta.height);
+}
+
 function createImagePixelLimitError(meta: ImageMetadata): Error {
   const pixelCount = countImagePixels(meta);
   const detail =
@@ -186,8 +190,7 @@ function createImagePixelLimitError(meta: ImageMetadata): Error {
 }
 
 function validateImagePixelLimit(meta: ImageMetadata): ImageMetadata {
-  const pixelCount = countImagePixels(meta);
-  if (pixelCount !== null && pixelCount > MAX_IMAGE_INPUT_PIXELS) {
+  if (exceedsImagePixelLimit(meta)) {
     throw createImagePixelLimitError(meta);
   }
   return meta;
