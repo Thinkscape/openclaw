@@ -357,6 +357,10 @@ function unwrapArchInvocation(argv: string[]): string[] | null {
   });
 }
 
+function supportsArchDispatchWrapper(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === "darwin";
+}
+
 function unwrapXcrunInvocation(argv: string[]): string[] | null {
   return scanWrapperInvocation(argv, {
     onToken: (token, lower) => {
@@ -373,12 +377,17 @@ function unwrapXcrunInvocation(argv: string[]): string[] | null {
 
 type DispatchWrapperSpec = {
   name: string;
-  unwrap?: (argv: string[]) => string[] | null;
-  transparentUsage?: boolean | ((argv: string[]) => boolean);
+  unwrap?: (argv: string[], platform?: NodeJS.Platform) => string[] | null;
+  transparentUsage?: boolean | ((argv: string[], platform?: NodeJS.Platform) => boolean);
 };
 
 const DISPATCH_WRAPPER_SPECS: readonly DispatchWrapperSpec[] = [
-  { name: "arch", unwrap: unwrapArchInvocation, transparentUsage: true },
+  {
+    name: "arch",
+    unwrap: (argv, platform) =>
+      supportsArchDispatchWrapper(platform) ? unwrapArchInvocation(argv) : null,
+    transparentUsage: (_argv, platform) => supportsArchDispatchWrapper(platform),
+  },
   { name: "chrt" },
   { name: "doas" },
   {
@@ -436,7 +445,10 @@ export function isDispatchWrapperExecutable(token: string): boolean {
   return DISPATCH_WRAPPER_SPEC_BY_NAME.has(normalizeExecutableToken(token));
 }
 
-export function unwrapKnownDispatchWrapperInvocation(argv: string[]): DispatchWrapperUnwrapResult {
+export function unwrapKnownDispatchWrapperInvocation(
+  argv: string[],
+  platform: NodeJS.Platform = process.platform,
+): DispatchWrapperUnwrapResult {
   const token0 = argv[0]?.trim();
   if (!token0) {
     return { kind: "not-wrapper" };
@@ -447,26 +459,31 @@ export function unwrapKnownDispatchWrapperInvocation(argv: string[]): DispatchWr
     return { kind: "not-wrapper" };
   }
   return spec.unwrap
-    ? unwrapDispatchWrapper(wrapper, spec.unwrap(argv))
+    ? unwrapDispatchWrapper(wrapper, spec.unwrap(argv, platform))
     : blockDispatchWrapper(wrapper);
 }
 
 export function unwrapDispatchWrappersForResolution(
   argv: string[],
   maxDepth = MAX_DISPATCH_WRAPPER_DEPTH,
+  platform: NodeJS.Platform = process.platform,
 ): string[] {
-  const plan = resolveDispatchWrapperTrustPlan(argv, maxDepth);
+  const plan = resolveDispatchWrapperTrustPlan(argv, maxDepth, platform);
   return plan.argv;
 }
 
-function isSemanticDispatchWrapperUsage(wrapper: string, argv: string[]): boolean {
+function isSemanticDispatchWrapperUsage(
+  wrapper: string,
+  argv: string[],
+  platform: NodeJS.Platform = process.platform,
+): boolean {
   const spec = DISPATCH_WRAPPER_SPEC_BY_NAME.get(wrapper);
   if (!spec?.unwrap) {
     return true;
   }
   const transparentUsage = spec.transparentUsage;
   if (typeof transparentUsage === "function") {
-    return !transparentUsage(argv);
+    return !transparentUsage(argv, platform);
   }
   return transparentUsage !== true;
 }
@@ -487,11 +504,12 @@ function blockedDispatchWrapperPlan(params: {
 export function resolveDispatchWrapperTrustPlan(
   argv: string[],
   maxDepth = MAX_DISPATCH_WRAPPER_DEPTH,
+  platform: NodeJS.Platform = process.platform,
 ): DispatchWrapperTrustPlan {
   let current = argv;
   const wrappers: string[] = [];
   for (let depth = 0; depth < maxDepth; depth += 1) {
-    const unwrap = unwrapKnownDispatchWrapperInvocation(current);
+    const unwrap = unwrapKnownDispatchWrapperInvocation(current, platform);
     if (unwrap.kind === "blocked") {
       return blockedDispatchWrapperPlan({
         argv: current,
@@ -503,7 +521,7 @@ export function resolveDispatchWrapperTrustPlan(
       break;
     }
     wrappers.push(unwrap.wrapper);
-    if (isSemanticDispatchWrapperUsage(unwrap.wrapper, current)) {
+    if (isSemanticDispatchWrapperUsage(unwrap.wrapper, current, platform)) {
       return blockedDispatchWrapperPlan({
         argv: current,
         wrappers,
@@ -513,7 +531,7 @@ export function resolveDispatchWrapperTrustPlan(
     current = unwrap.argv;
   }
   if (wrappers.length >= maxDepth) {
-    const overflow = unwrapKnownDispatchWrapperInvocation(current);
+    const overflow = unwrapKnownDispatchWrapperInvocation(current, platform);
     if (overflow.kind === "blocked" || overflow.kind === "unwrapped") {
       return blockedDispatchWrapperPlan({
         argv: current,
