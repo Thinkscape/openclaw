@@ -240,6 +240,51 @@ describe("buildWorkspaceSkillSnapshot", () => {
     expect(snapshot.prompt).not.toContain("repo-skill-07");
   });
 
+  it("rewrites prompt-facing extra-dir skill paths for sandboxed sessions", async () => {
+    const workspaceDir = await fixtureSuite.createCaseDir("workspace");
+    const sharedSkillsDir = path.join(workspaceDir, "shared-skills");
+    const skillDir = path.join(sharedSkillsDir, "docker-deploy");
+
+    await writeSkill({
+      dir: skillDir,
+      name: "docker-deploy",
+      description: "Deploy with Docker",
+      body: "# Docker Deploy\n",
+    });
+
+    const snapshot = withWorkspaceHome(workspaceDir, () =>
+      buildWorkspaceSkillSnapshot(workspaceDir, {
+        config: {
+          agents: {
+            defaults: {
+              sandbox: {
+                mode: "all",
+              },
+            },
+          },
+          skills: {
+            load: {
+              extraDirs: [sharedSkillsDir],
+              promptPathAliases: [
+                {
+                  from: sharedSkillsDir,
+                  to: "/shared/skills",
+                  when: "sandbox",
+                },
+              ],
+            },
+          },
+        },
+        managedSkillsDir: path.join(workspaceDir, ".managed"),
+        bundledSkillsDir: path.join(workspaceDir, ".bundled"),
+        sessionKey: "agent:main",
+      }),
+    );
+
+    expect(snapshot.prompt).toContain("/shared/skills/docker-deploy/SKILL.md");
+    expect(snapshot.prompt).not.toContain(path.join(skillDir, "SKILL.md"));
+  });
+
   it("skips skills whose SKILL.md exceeds maxSkillFileBytes", async () => {
     const workspaceDir = await fixtureSuite.createCaseDir("workspace");
 
