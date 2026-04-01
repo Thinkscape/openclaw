@@ -59,4 +59,5 @@ jobs:
           PATCH_REF_SUBAGENT: thinkscape-patch-subagent-gateway-timeout
           PATCH_REF_SESSION_LOCK: thinkscape-patch-session-write-lock
           PATCH_REF_SANDBOX_NO_NEW_PRIVILEGES: thinkscape-patch-sandbox-no-new-privileges
+          PATCH_REF_SKILL_PROMPT_ALIAS: thinkscape-patch-skill-prompt-path-alias
         run: bash scripts/thinkscape-upstream-release-sync.sh
