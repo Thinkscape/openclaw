@@ -59,6 +59,7 @@ export async function resolveCommandsSystemPromptBundle(
           }),
         },
         snapshotVersion: getSkillsSnapshotVersion(workspaceDir),
+        sessionKey: params.ctx.SessionKey ?? params.sessionKey,
       });
     } catch {
       return { prompt: "", skills: [], resolvedSkills: [] };
