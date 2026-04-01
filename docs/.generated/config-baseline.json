@@ -3413,6 +3413,22 @@
       "hasChildren": false
     },
     {
+      "path": "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges",
+      "kind": "core",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced",
+        "security",
+        "storage"
+      ],
+      "label": "Sandbox Docker Disable No New Privileges",
+      "help": "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
+      "hasChildren": false
+    },
+    {
       "path": "agents.defaults.sandbox.docker.dns",
       "kind": "core",
       "type": "array",
@@ -3991,6 +4007,16 @@
     },
     {
       "path": "agents.defaults.subagents.archiveAfterMinutes",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "agents.defaults.subagents.gatewayTimeoutMs",
       "kind": "core",
       "type": "integer",
       "required": false,
@@ -5866,6 +5892,22 @@
       "deprecated": false,
       "sensitive": false,
       "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "agents.list.*.sandbox.docker.dangerouslyDisableNoNewPrivileges",
+      "kind": "core",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced",
+        "security",
+        "storage"
+      ],
+      "label": "Agent Sandbox Docker Disable No New Privileges",
+      "help": "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
       "hasChildren": false
     },
     {
@@ -61629,6 +61671,80 @@
       ],
       "label": "Session Typing Mode",
       "help": "Controls typing behavior timing: \"never\", \"instant\", \"thinking\", or \"message\" based emission points. Keep conservative modes in high-volume channels to avoid unnecessary typing noise.",
+      "hasChildren": false
+    },
+    {
+      "path": "session.writeLock",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "storage"
+      ],
+      "label": "Session Write Lock",
+      "help": "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
+      "hasChildren": true
+    },
+    {
+      "path": "session.writeLock.backoffBaseMs",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "reliability",
+        "storage"
+      ],
+      "label": "Session Write Lock Backoff Base (ms)",
+      "help": "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
+      "hasChildren": false
+    },
+    {
+      "path": "session.writeLock.backoffCapMs",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "reliability",
+        "storage"
+      ],
+      "label": "Session Write Lock Backoff Cap (ms)",
+      "help": "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
+      "hasChildren": false
+    },
+    {
+      "path": "session.writeLock.backoffJitterMs",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "reliability",
+        "storage"
+      ],
+      "label": "Session Write Lock Backoff Jitter (ms)",
+      "help": "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
+      "hasChildren": false
+    },
+    {
+      "path": "session.writeLock.timeoutMs",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "performance",
+        "storage"
+      ],
+      "label": "Session Write Lock Timeout (ms)",
+      "help": "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
       "hasChildren": false
     },
     {
