@@ -11,6 +11,42 @@ describe("resolveSkillsPromptForRun", () => {
     });
     expect(prompt).toBe("SNAPSHOT");
   });
+
+  it("rewrites snapshot prompt locations when a sandbox path alias applies", () => {
+    const prompt = resolveSkillsPromptForRun({
+      skillsSnapshot: {
+        prompt:
+          "<available_skills>\n  <skill>\n    <location>/home/node/.openclaw/shared/skills/docker-deploy/SKILL.md</location>\n  </skill>\n</available_skills>",
+        skills: [],
+      },
+      config: {
+        agents: {
+          defaults: {
+            sandbox: {
+              mode: "all",
+            },
+          },
+        },
+        skills: {
+          load: {
+            promptPathAliases: [
+              {
+                from: "/home/node/.openclaw/shared/skills",
+                to: "/shared/skills",
+                when: "sandbox",
+              },
+            ],
+          },
+        },
+      },
+      sessionKey: "agent:main",
+      workspaceDir: "/tmp/openclaw",
+    });
+
+    expect(prompt).toContain("/shared/skills/docker-deploy/SKILL.md");
+    expect(prompt).not.toContain("/home/node/.openclaw/shared/skills/docker-deploy/SKILL.md");
+  });
+
   it("builds prompt from entries when snapshot is missing", () => {
     const entry: SkillEntry = {
       skill: createFixtureSkill({

@@ -20,6 +20,24 @@ describe("skills entries config schema", () => {
     expect(res.success).toBe(true);
   });
 
+  it("accepts promptPathAliases under skills.load", () => {
+    const res = OpenClawSchema.safeParse({
+      skills: {
+        load: {
+          promptPathAliases: [
+            {
+              from: "/home/node/.openclaw/shared/skills",
+              to: "/shared/skills",
+              when: "sandbox",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(res.success).toBe(true);
+  });
+
   it("rejects unknown top-level fields", () => {
     const res = OpenClawSchema.safeParse({
       skills: {
