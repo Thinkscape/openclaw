@@ -9,6 +9,7 @@ DOCKER_RELEASE_WORKFLOW="${DOCKER_RELEASE_WORKFLOW:-docker-release.yml}"
 TARGET_IMAGE="${TARGET_IMAGE:-ghcr.io/thinkscape/openclaw}"
 PATCH_REF_SUBAGENT="${PATCH_REF_SUBAGENT:-thinkscape-patch-subagent-gateway-timeout}"
 PATCH_REF_SESSION_LOCK="${PATCH_REF_SESSION_LOCK:-thinkscape-patch-session-write-lock}"
+PATCH_REF_SANDBOX_NO_NEW_PRIVILEGES="${PATCH_REF_SANDBOX_NO_NEW_PRIVILEGES:-thinkscape-patch-sandbox-no-new-privileges}"
 RELEASE_TAG="${RELEASE_TAG:-}"
 SYNC_DRY_RUN="${SYNC_DRY_RUN:-0}"
 COPILOT_ASSIGNMENT_TOKEN="${COPILOT_ASSIGNMENT_TOKEN:-}"
@@ -18,6 +19,10 @@ WORKFLOW_MAX_POLLS="${WORKFLOW_MAX_POLLS:-240}"
 PATCH_REFS=(
   "${PATCH_REF_SUBAGENT}"
   "${PATCH_REF_SESSION_LOCK}"
+)
+
+OPTIONAL_PATCH_REFS=(
+  "${PATCH_REF_SANDBOX_NO_NEW_PRIVILEGES}"
 )
 
 log() {
@@ -283,6 +288,18 @@ main() {
   fi
 
   git checkout -B "${release_branch}" "${upstream_commit}"
+
+  local optional_patch_ref
+  for optional_patch_ref in "${OPTIONAL_PATCH_REFS[@]}"; do
+    if [[ -z "${optional_patch_ref}" ]]; then
+      continue
+    fi
+    if git rev-parse -q --verify "${optional_patch_ref}^{commit}" >/dev/null 2>&1; then
+      PATCH_REFS+=("${optional_patch_ref}")
+    else
+      log "Optional patch ref ${optional_patch_ref} not found; skipping"
+    fi
+  done
 
   local patch_ref
   for patch_ref in "${PATCH_REFS[@]}"; do
