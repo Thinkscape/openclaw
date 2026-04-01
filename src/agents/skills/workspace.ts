@@ -7,6 +7,7 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { CONFIG_DIR, resolveUserPath } from "../../utils.js";
 import { resolveSandboxPath } from "../sandbox-paths.js";
+import { resolveSandboxRuntimeStatus } from "../sandbox/runtime-status.js";
 import { resolveEffectiveAgentSkillFilter } from "./agent-filter.js";
 import { resolveBundledSkillsDir } from "./bundled-dir.js";
 import { shouldIncludeSkill } from "./config.js";
@@ -25,6 +26,11 @@ import type {
 
 const fsp = fs.promises;
 const skillsLogger = createSubsystemLogger("skills");
+
+type ActiveSkillPromptPathAlias = {
+  from: string;
+  to: string;
+};
 
 /**
  * Replace the user's home directory prefix with `~` in skill file paths
@@ -54,6 +60,125 @@ function isSkillVisibleInAvailableSkillsPrompt(entry: SkillEntry): boolean {
     return entry.invocation.disableModelInvocation !== true;
   }
   return entry.skill.disableModelInvocation !== true;
+}
+
+function resolveActiveSkillPromptPathAliases(params: {
+  config?: OpenClawConfig;
+  sessionKey?: string;
+}): ActiveSkillPromptPathAlias[] {
+  const aliasesRaw = params.config?.skills?.load?.promptPathAliases ?? [];
+  const sandboxed = params.sessionKey
+    ? resolveSandboxRuntimeStatus({
+        cfg: params.config,
+        sessionKey: params.sessionKey,
+      }).sandboxed
+    : false;
+
+  return aliasesRaw
+    .flatMap((alias) => {
+      const from = typeof alias?.from === "string" ? alias.from.trim() : "";
+      const to = typeof alias?.to === "string" ? alias.to.trim() : "";
+      if (!from || !to) {
+        return [];
+      }
+      const when = alias.when ?? "always";
+      if (when === "sandbox" && !sandboxed) {
+        return [];
+      }
+      return [
+        {
+          from: resolveUserPath(from),
+          to: normalizePromptPathPrefix(to),
+        },
+      ];
+    })
+    .toSorted((a, b) => b.from.length - a.from.length);
+}
+
+function normalizePromptPathPrefix(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (trimmed === "/" || trimmed === "\\") {
+    return trimmed[0];
+  }
+  return trimmed.replace(/[\\/]+$/, "");
+}
+
+function isWindowsPromptPath(input: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(input) || input.startsWith("\\\\");
+}
+
+function joinPromptPath(prefix: string, relativePath: string): string {
+  if (!relativePath) {
+    return prefix;
+  }
+  const segments = relativePath.split(path.sep).filter(Boolean);
+  if (segments.length === 0) {
+    return prefix;
+  }
+  if (isWindowsPromptPath(prefix)) {
+    return path.win32.join(prefix, ...segments);
+  }
+  const normalizedPrefix = prefix.replace(/\\/g, "/");
+  return path.posix.join(normalizedPrefix, ...segments);
+}
+
+function rewriteSkillPathForPrompt(
+  filePath: string,
+  aliases: ActiveSkillPromptPathAlias[],
+): string {
+  for (const alias of aliases) {
+    const relative = path.relative(alias.from, filePath);
+    if (!relative) {
+      return alias.to;
+    }
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      continue;
+    }
+    return joinPromptPath(alias.to, relative);
+  }
+  return filePath;
+}
+
+function applySkillPromptPathAliases(
+  skills: Skill[],
+  aliases: ActiveSkillPromptPathAlias[],
+): Skill[] {
+  if (aliases.length === 0) {
+    return skills;
+  }
+  return skills.map((skill) => ({
+    ...skill,
+    filePath: rewriteSkillPathForPrompt(skill.filePath, aliases),
+  }));
+}
+
+function unescapeXml(input: string): string {
+  return input
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+function rewriteSkillsPromptLocations(
+  prompt: string,
+  aliases: ActiveSkillPromptPathAlias[],
+): string {
+  if (!prompt.trim() || aliases.length === 0) {
+    return prompt;
+  }
+  return prompt.replace(/<location>([^<]+)<\/location>/g, (match, encodedPath: string) => {
+    const decodedPath = unescapeXml(encodedPath);
+    const rewrittenPath = rewriteSkillPathForPrompt(decodedPath, aliases);
+    if (rewrittenPath === decodedPath) {
+      return match;
+    }
+    return `<location>${escapeXml(rewrittenPath)}</location>`;
+  });
 }
 
 function filterSkillEntries(
@@ -613,6 +738,7 @@ type WorkspaceSkillBuildOptions = {
   bundledSkillsDir?: string;
   entries?: SkillEntry[];
   agentId?: string;
+  sessionKey?: string;
   /** If provided, only include skills with these names */
   skillFilter?: string[];
   eligibility?: SkillEligibilityContext;
@@ -649,11 +775,17 @@ function resolveWorkspaceSkillPromptState(
   const promptEntries = eligible.filter((entry) => isSkillVisibleInAvailableSkillsPrompt(entry));
   const remoteNote = opts?.eligibility?.remote?.note?.trim();
   const resolvedSkills = promptEntries.map((entry) => entry.skill);
+  const promptPathAliases = resolveActiveSkillPromptPathAliases({
+    config: opts?.config,
+    sessionKey: opts?.sessionKey,
+  });
   // Derive prompt-facing skills with compacted paths (e.g. ~/...) once.
   // Budget checks and final render both use this same representation so the
   // tier decision is based on the exact strings that end up in the prompt.
   // resolvedSkills keeps canonical paths for snapshot / runtime consumers.
-  const promptSkills = compactSkillPaths(resolvedSkills);
+  const promptSkills = compactSkillPaths(
+    applySkillPromptPathAliases(resolvedSkills, promptPathAliases),
+  );
   const { skillsForPrompt, truncated, compact } = applySkillsPromptLimits({
     skills: promptSkills,
     config: opts?.config,
@@ -679,16 +811,22 @@ export function resolveSkillsPromptForRun(params: {
   config?: OpenClawConfig;
   workspaceDir: string;
   agentId?: string;
+  sessionKey?: string;
 }): string {
+  const promptPathAliases = resolveActiveSkillPromptPathAliases({
+    config: params.config,
+    sessionKey: params.sessionKey,
+  });
   const snapshotPrompt = params.skillsSnapshot?.prompt?.trim();
   if (snapshotPrompt) {
-    return snapshotPrompt;
+    return rewriteSkillsPromptLocations(snapshotPrompt, promptPathAliases);
   }
   if (params.entries && params.entries.length > 0) {
     const prompt = buildWorkspaceSkillsPrompt(params.workspaceDir, {
       entries: params.entries,
       config: params.config,
       agentId: params.agentId,
+      sessionKey: params.sessionKey,
     });
     return prompt.trim() ? prompt : "";
   }

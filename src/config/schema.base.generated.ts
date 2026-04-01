@@ -21899,6 +21899,34 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
           load: {
             type: "object",
             properties: {
+              promptPathAliases: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    from: {
+                      type: "string",
+                    },
+                    to: {
+                      type: "string",
+                    },
+                    when: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          const: "always",
+                        },
+                        {
+                          type: "string",
+                          const: "sandbox",
+                        },
+                      ],
+                    },
+                  },
+                  required: ["from", "to"],
+                  additionalProperties: false,
+                },
+              },
               extraDirs: {
                 type: "array",
                 items: {
@@ -24204,6 +24232,26 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "Broadcast Destination List",
       help: "Per-source broadcast destination list where each key is a source peer ID and the value is an array of destination peer IDs. Keep lists intentional to avoid accidental message amplification.",
       tags: ["advanced"],
+    },
+    "skills.load.promptPathAliases": {
+      label: "Skill Prompt Path Aliases",
+      help: "Optional prompt-facing path alias rules for skill locations. Use these when skills are discovered from a host or gateway path but must be read through a different runtime-visible path such as a sandbox bind mount.",
+      tags: ["storage"],
+    },
+    "skills.load.promptPathAliases[].from": {
+      label: "Skill Prompt Alias Source Prefix",
+      help: "Canonical source path prefix to match against discovered SKILL.md locations before rendering the skills prompt. This should point at the host or gateway-visible directory returned by skill discovery, for example `/home/node/.openclaw/shared/skills`.",
+      tags: ["storage"],
+    },
+    "skills.load.promptPathAliases[].to": {
+      label: "Skill Prompt Alias Target Prefix",
+      help: "Replacement path prefix shown to the agent in the skills prompt when a matching source path is found. Point this at the runtime-visible location the read tool can actually open, for example `/shared/skills` inside a sandbox.",
+      tags: ["storage"],
+    },
+    "skills.load.promptPathAliases[].when": {
+      label: "Skill Prompt Alias Scope",
+      help: 'Controls when the alias applies: `"always"` rewrites prompt locations in every run, while `"sandbox"` only rewrites them for sandboxed sessions.',
+      tags: ["storage"],
     },
     "skills.load.watch": {
       label: "Watch Skills",
