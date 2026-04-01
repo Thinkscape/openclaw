@@ -13,6 +13,7 @@ export function resolveCronSkillsSnapshot(params: {
   workspaceDir: string;
   config: OpenClawConfig;
   agentId: string;
+  sessionKey?: string;
   existingSnapshot?: SkillSnapshot;
   isFastTestEnv: boolean;
 }): SkillSnapshot {
@@ -44,6 +45,7 @@ export function resolveCronSkillsSnapshot(params: {
         }),
       }),
     },
+    sessionKey: params.sessionKey,
     snapshotVersion,
   });
 }
