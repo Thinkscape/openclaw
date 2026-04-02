@@ -302,7 +302,13 @@ main() {
     fi
   fi
 
-  git checkout -B "${release_branch}" "${upstream_commit}"
+  git checkout -B "${release_branch}" "origin/${DEFAULT_BRANCH}"
+  # Keep workflow files on the fork's main lineage so the default GitHub
+  # Actions token can push release refs without extra workflows permission.
+  git restore --source "${upstream_commit}" --staged --worktree -- . ':(exclude).github/workflows'
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    git commit --no-verify -m "chore(release-sync): stage upstream snapshot for ${release_tag}"
+  fi
 
   local optional_patch_ref
   for optional_patch_ref in "${OPTIONAL_PATCH_REFS[@]}"; do
@@ -349,7 +355,7 @@ main() {
     src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts \
     src/agents/session-write-lock.test.ts
 
-  if ! git diff --quiet; then
+  if ! git diff --quiet || ! git diff --cached --quiet; then
     git add -A
     git commit --no-verify -m "chore(release-sync): refresh generated artifacts for ${release_tag}"
   fi
