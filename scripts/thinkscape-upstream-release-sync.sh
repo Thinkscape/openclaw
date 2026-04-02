@@ -260,18 +260,19 @@ main() {
 
   local release_version="${release_tag#v}"
   local release_branch="release/${release_tag}-thinkscape"
+  local upstream_tag_ref="refs/thinkscape/upstream-release-sync/${release_tag}"
 
   log "Syncing upstream release ${release_tag}"
 
   git remote add upstream "${UPSTREAM_URL}" 2>/dev/null || true
   git fetch origin --tags --prune
-  git fetch upstream --tags --prune
 
   local upstream_commit
-  upstream_commit="$(git ls-remote "${UPSTREAM_URL}" "refs/tags/${release_tag}^{}" | awk '{print $1}')"
-  if [[ -z "${upstream_commit}" ]]; then
-    upstream_commit="$(git ls-remote "${UPSTREAM_URL}" "refs/tags/${release_tag}" | awk '{print $1}')"
-  fi
+  # Keep upstream release tags out of the fork's local tag namespace because
+  # the fork intentionally reuses upstream tag names for patched releases.
+  git update-ref -d "${upstream_tag_ref}" >/dev/null 2>&1 || true
+  git fetch --no-tags upstream "refs/tags/${release_tag}:${upstream_tag_ref}"
+  upstream_commit="$(git rev-parse "${upstream_tag_ref}^{}")"
   if [[ -z "${upstream_commit}" ]]; then
     printf 'could not resolve upstream tag %s\n' "${release_tag}" >&2
     exit 1
