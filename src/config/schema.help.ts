@@ -377,10 +377,6 @@ export const FIELD_HELP: Record<string, string> = {
     "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
   "agents.list[].sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
     "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
-  "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges":
-    "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
-  "agents.list[].sandbox.docker.dangerouslyDisableNoNewPrivileges":
-    "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
   "agents.defaults.sandbox.browser.cdpSourceRange":
     "Optional CIDR allowlist for container-edge CDP ingress (for example 172.21.0.1/32).",
   "agents.list[].sandbox.browser.cdpSourceRange":
@@ -441,6 +437,8 @@ export const FIELD_HELP: Record<string, string> = {
     "Extra node.invoke commands to allow beyond the gateway defaults (array of command strings). Enabling dangerous commands here is a security-sensitive override and is flagged by `openclaw security audit`.",
   "gateway.nodes.denyCommands":
     "Node command names to block even if present in node claims or default allowlist (exact command-name matching only, e.g. `system.run`; does not inspect shell text inside that command).",
+  "gateway.webchat.chatHistoryMaxChars":
+    "Max characters per text field in chat.history responses before truncation (default: 12000).",
   nodeHost:
     "Node host controls for features exposed from this gateway node to other nodes or clients. Keep defaults unless you intentionally proxy local capabilities across your node network.",
   "nodeHost.browserProxy":
@@ -629,14 +627,6 @@ export const FIELD_HELP: Record<string, string> = {
     "Ordered model preferences specifically for video understanding before shared media fallback applies. Prioritize models with strong multimodal video support to minimize degraded summaries.",
   "tools.media.video.scope":
     "Scope selector controlling when video understanding is attempted across incoming events. Narrow scope in noisy channels, and broaden only where video interpretation is core to workflow.",
-  "skills.load.promptPathAliases":
-    "Optional prompt-facing path alias rules for skill locations. Use these when skills are discovered from a host or gateway path but must be read through a different runtime-visible path such as a sandbox bind mount.",
-  "skills.load.promptPathAliases[].from":
-    "Canonical source path prefix to match against discovered SKILL.md locations before rendering the skills prompt. This should point at the host or gateway-visible directory returned by skill discovery, for example `/home/node/.openclaw/shared/skills`.",
-  "skills.load.promptPathAliases[].to":
-    "Replacement path prefix shown to the agent in the skills prompt when a matching source path is found. Point this at the runtime-visible location the read tool can actually open, for example `/shared/skills` inside a sandbox.",
-  "skills.load.promptPathAliases[].when":
-    'Controls when the alias applies: `"always"` rewrites prompt locations in every run, while `"sandbox"` only rewrites them for sandboxed sessions.',
   "skills.load.watch":
     "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
   "skills.load.watchDebounceMs":
@@ -730,31 +720,13 @@ export const FIELD_HELP: Record<string, string> = {
   "tools.web.fetch.maxCharsCap":
     "Hard cap for web_fetch maxChars (applies to config and tool calls).",
   "tools.web.fetch.maxResponseBytes": "Max download size before truncation.",
+  "tools.web.fetch.provider": "Web fetch fallback provider id.",
   "tools.web.fetch.timeoutSeconds": "Timeout in seconds for web_fetch requests.",
   "tools.web.fetch.cacheTtlMinutes": "Cache TTL in minutes for web_fetch results.",
   "tools.web.fetch.maxRedirects": "Maximum redirects allowed for web_fetch (default: 3).",
   "tools.web.fetch.userAgent": "Override User-Agent header for web_fetch requests.",
   "tools.web.fetch.readability":
     "Use Readability to extract main content from HTML (fallbacks to basic HTML cleanup).",
-  "tools.web.fetch.firecrawl.enabled": "Enable Firecrawl fallback for web_fetch (if configured).",
-  "tools.web.fetch.firecrawl.apiKey": "Firecrawl API key (fallback: FIRECRAWL_API_KEY env var).",
-  "tools.web.fetch.firecrawl.baseUrl":
-    "Firecrawl base URL (e.g. https://api.firecrawl.dev or custom endpoint).",
-  "tools.web.fetch.firecrawl.onlyMainContent":
-    "When true, Firecrawl returns only the main content (default: true).",
-  "tools.web.fetch.firecrawl.maxAgeMs":
-    "Firecrawl maxAge (ms) for cached results when supported by the API.",
-  "tools.web.fetch.firecrawl.timeoutSeconds": "Timeout in seconds for Firecrawl requests.",
-  "tools.web.x_search.enabled":
-    "Enable the x_search tool (requires XAI_API_KEY or tools.web.x_search.apiKey).",
-  "tools.web.x_search.apiKey": "xAI API key for X search (fallback: XAI_API_KEY env var).",
-  "tools.web.x_search.model": 'Model to use for X search (default: "grok-4-1-fast-non-reasoning").',
-  "tools.web.x_search.inlineCitations":
-    "Keep inline citations from xAI in x_search responses when available (default: false).",
-  "tools.web.x_search.maxTurns":
-    "Optional max internal search/tool turns xAI may use per x_search request. Omit to let xAI choose.",
-  "tools.web.x_search.timeoutSeconds": "Timeout in seconds for x_search requests.",
-  "tools.web.x_search.cacheTtlMinutes": "Cache TTL in minutes for x_search results.",
   models:
     "Model catalog root for provider definitions, merge/replace behavior, and optional Bedrock discovery integration. Keep provider definitions explicit and validated before relying on production failover paths.",
   "models.mode":
@@ -817,6 +789,8 @@ export const FIELD_HELP: Record<string, string> = {
     "Maximum same-provider auth-profile rotations allowed for overloaded errors before switching to model fallback (default: 1).",
   "auth.cooldowns.overloadedBackoffMs":
     "Fixed delay in milliseconds before retrying an overloaded provider/profile rotation (default: 0).",
+  "auth.cooldowns.rateLimitedProfileRotations":
+    "Maximum same-provider auth-profile rotations allowed for rate-limit errors before switching to model fallback (default: 1).",
   "agents.defaults.workspace":
     "Default workspace path exposed to agent runtime tools for filesystem context and repo-aware behavior. Set this explicitly when running from wrappers so path resolution stays deterministic.",
   "agents.defaults.bootstrapMaxChars":
@@ -1124,6 +1098,8 @@ export const FIELD_HELP: Record<string, string> = {
     "Optional provider/model override used only for compaction summarization. Set this when you want compaction to run on a different model than the session default, and leave it unset to keep using the primary agent model.",
   "agents.defaults.compaction.truncateAfterCompaction":
     "When enabled, rewrites the session JSONL file after compaction to remove entries that were summarized. Prevents unbounded file growth in long-running sessions with many compaction cycles. Default: false.",
+  "agents.defaults.compaction.notifyUser":
+    "When enabled, sends a brief compaction notice to the user (e.g. '🧹 Compacting context...') when compaction starts. Disabled by default to keep compaction silent and non-intrusive.",
   "agents.defaults.compaction.memoryFlush":
     "Pre-compaction memory flush settings that run an agentic memory write before heavy compaction. Keep enabled for long sessions so salient context is persisted before aggressive trimming.",
   "agents.defaults.compaction.memoryFlush.enabled":
@@ -1246,16 +1222,6 @@ export const FIELD_HELP: Record<string, string> = {
     "Default inactivity window in hours for thread-bound sessions across providers/channels (0 disables idle auto-unfocus). Default: 24.",
   "session.threadBindings.maxAgeHours":
     "Optional hard max age in hours for thread-bound sessions across providers/channels (0 disables hard cap). Default: 0.",
-  "session.writeLock":
-    "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
-  "session.writeLock.timeoutMs":
-    "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
-  "session.writeLock.backoffBaseMs":
-    "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
-  "session.writeLock.backoffCapMs":
-    "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
-  "session.writeLock.backoffJitterMs":
-    "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
   "session.maintenance":
     "Automatic session-store maintenance controls for pruning age, entry caps, and file rotation behavior. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
   "session.maintenance.mode":

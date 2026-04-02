@@ -16,6 +16,8 @@ import {
 
 export const AgentDefaultsSchema = z
   .object({
+    /** Global default provider params applied to all models before per-model and per-agent overrides. */
+    params: z.record(z.string(), z.unknown()).optional(),
     model: AgentModelSchema.optional(),
     imageModel: AgentModelSchema.optional(),
     imageGenerationModel: AgentModelSchema.optional(),
@@ -139,6 +141,7 @@ export const AgentDefaultsSchema = z
           })
           .strict()
           .optional(),
+        notifyUser: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -202,14 +205,6 @@ export const AgentDefaultsSchema = z
         model: AgentModelSchema.optional(),
         thinking: z.string().optional(),
         runTimeoutSeconds: z.number().int().min(0).optional(),
-        gatewayTimeoutMs: z
-          .number()
-          .int()
-          .positive()
-          .optional()
-          .describe(
-            "Internal gateway timeout in milliseconds for sub-agent spawn self-calls such as sessions.patch, agent, and sessions.delete (default: 10000). Increase on slower gateways or remote filesystems that delay child acceptance.",
-          ),
         announceTimeoutMs: z.number().int().positive().optional(),
         requireAgentId: z.boolean().optional(),
       })

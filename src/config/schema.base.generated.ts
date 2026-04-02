@@ -799,6 +799,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                 minimum: 0,
                 maximum: 9007199254740991,
               },
+              rateLimitedProfileRotations: {
+                type: "integer",
+                minimum: 0,
+                maximum: 9007199254740991,
+              },
             },
             additionalProperties: false,
           },
@@ -1373,6 +1378,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
           defaults: {
             type: "object",
             properties: {
+              params: {
+                type: "object",
+                propertyNames: {
+                  type: "string",
+                },
+                additionalProperties: {},
+              },
               model: {
                 anyOf: [
                   {
@@ -2479,6 +2491,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                     },
                     additionalProperties: false,
                   },
+                  notifyUser: {
+                    type: "boolean",
+                  },
                 },
                 additionalProperties: false,
               },
@@ -2853,13 +2868,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                     minimum: 0,
                     maximum: 9007199254740991,
                   },
-                  gatewayTimeoutMs: {
-                    description:
-                      "Internal gateway timeout in milliseconds for sub-agent spawn self-calls such as sessions.patch, agent, and sessions.delete (default: 10000). Increase on slower gateways or remote filesystems that delay child acceptance.",
-                    type: "integer",
-                    exclusiveMinimum: 0,
-                    maximum: 9007199254740991,
-                  },
                   announceTimeoutMs: {
                     type: "integer",
                     exclusiveMinimum: 0,
@@ -3079,9 +3087,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                         type: "boolean",
                       },
                       dangerouslyAllowContainerNamespaceJoin: {
-                        type: "boolean",
-                      },
-                      dangerouslyDisableNoNewPrivileges: {
                         type: "boolean",
                       },
                     },
@@ -4268,9 +4273,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                         dangerouslyAllowContainerNamespaceJoin: {
                           type: "boolean",
                         },
-                        dangerouslyDisableNoNewPrivileges: {
-                          type: "boolean",
-                        },
                       },
                       additionalProperties: false,
                     },
@@ -5202,6 +5204,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                   enabled: {
                     type: "boolean",
                   },
+                  provider: {
+                    type: "string",
+                  },
                   maxChars: {
                     type: "integer",
                     exclusiveMinimum: 0,
@@ -5336,72 +5341,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                 properties: {
                   enabled: {
                     type: "boolean",
-                  },
-                  apiKey: {
-                    anyOf: [
-                      {
-                        type: "string",
-                      },
-                      {
-                        oneOf: [
-                          {
-                            type: "object",
-                            properties: {
-                              source: {
-                                type: "string",
-                                const: "env",
-                              },
-                              provider: {
-                                type: "string",
-                                pattern: "^[a-z][a-z0-9_-]{0,63}$",
-                              },
-                              id: {
-                                type: "string",
-                                pattern: "^[A-Z][A-Z0-9_]{0,127}$",
-                              },
-                            },
-                            required: ["source", "provider", "id"],
-                            additionalProperties: false,
-                          },
-                          {
-                            type: "object",
-                            properties: {
-                              source: {
-                                type: "string",
-                                const: "file",
-                              },
-                              provider: {
-                                type: "string",
-                                pattern: "^[a-z][a-z0-9_-]{0,63}$",
-                              },
-                              id: {
-                                type: "string",
-                              },
-                            },
-                            required: ["source", "provider", "id"],
-                            additionalProperties: false,
-                          },
-                          {
-                            type: "object",
-                            properties: {
-                              source: {
-                                type: "string",
-                                const: "exec",
-                              },
-                              provider: {
-                                type: "string",
-                                pattern: "^[a-z][a-z0-9_-]{0,63}$",
-                              },
-                              id: {
-                                type: "string",
-                              },
-                            },
-                            required: ["source", "provider", "id"],
-                            additionalProperties: false,
-                          },
-                        ],
-                      },
-                    ],
                   },
                   model: {
                     type: "string",
@@ -8631,32 +8570,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
             },
             additionalProperties: false,
           },
-          writeLock: {
-            type: "object",
-            properties: {
-              timeoutMs: {
-                type: "integer",
-                exclusiveMinimum: 0,
-                maximum: 9007199254740991,
-              },
-              backoffBaseMs: {
-                type: "integer",
-                exclusiveMinimum: 0,
-                maximum: 9007199254740991,
-              },
-              backoffCapMs: {
-                type: "integer",
-                exclusiveMinimum: 0,
-                maximum: 9007199254740991,
-              },
-              backoffJitterMs: {
-                type: "integer",
-                minimum: 0,
-                maximum: 9007199254740991,
-              },
-            },
-            additionalProperties: false,
-          },
           maintenance: {
             type: "object",
             properties: {
@@ -9954,6 +9867,17 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
             },
             additionalProperties: false,
           },
+          webchat: {
+            type: "object",
+            properties: {
+              chatHistoryMaxChars: {
+                type: "integer",
+                exclusiveMinimum: 0,
+                maximum: 500000,
+              },
+            },
+            additionalProperties: false,
+          },
           channelHealthCheckMinutes: {
             type: "integer",
             minimum: 0,
@@ -10834,34 +10758,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
           load: {
             type: "object",
             properties: {
-              promptPathAliases: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    from: {
-                      type: "string",
-                    },
-                    to: {
-                      type: "string",
-                    },
-                    when: {
-                      anyOf: [
-                        {
-                          type: "string",
-                          const: "always",
-                        },
-                        {
-                          type: "string",
-                          const: "sandbox",
-                        },
-                      ],
-                    },
-                  },
-                  required: ["from", "to"],
-                  additionalProperties: false,
-                },
-              },
               extraDirs: {
                 type: "array",
                 items: {
@@ -12664,6 +12560,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       help: "Max download size before truncation.",
       tags: ["performance", "tools"],
     },
+    "tools.web.fetch.provider": {
+      label: "Web Fetch Provider",
+      help: "Web fetch fallback provider id.",
+      tags: ["tools"],
+    },
     "tools.web.fetch.timeoutSeconds": {
       label: "Web Fetch Timeout (sec)",
       help: "Timeout in seconds for web_fetch requests.",
@@ -12688,73 +12589,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       label: "Web Fetch Readability Extraction",
       help: "Use Readability to extract main content from HTML (fallbacks to basic HTML cleanup).",
       tags: ["tools"],
-    },
-    "tools.web.fetch.firecrawl.enabled": {
-      label: "Enable Firecrawl Fallback",
-      help: "Enable Firecrawl fallback for web_fetch (if configured).",
-      tags: ["tools"],
-    },
-    "tools.web.fetch.firecrawl.apiKey": {
-      label: "Firecrawl API Key",
-      help: "Firecrawl API key (fallback: FIRECRAWL_API_KEY env var).",
-      tags: ["security", "auth", "tools"],
-      sensitive: true,
-    },
-    "tools.web.fetch.firecrawl.baseUrl": {
-      label: "Firecrawl Base URL",
-      help: "Firecrawl base URL (e.g. https://api.firecrawl.dev or custom endpoint).",
-      tags: ["tools", "url-secret"],
-    },
-    "tools.web.fetch.firecrawl.onlyMainContent": {
-      label: "Firecrawl Main Content Only",
-      help: "When true, Firecrawl returns only the main content (default: true).",
-      tags: ["tools"],
-    },
-    "tools.web.fetch.firecrawl.maxAgeMs": {
-      label: "Firecrawl Cache Max Age (ms)",
-      help: "Firecrawl maxAge (ms) for cached results when supported by the API.",
-      tags: ["performance", "tools"],
-    },
-    "tools.web.fetch.firecrawl.timeoutSeconds": {
-      label: "Firecrawl Timeout (sec)",
-      help: "Timeout in seconds for Firecrawl requests.",
-      tags: ["performance", "tools"],
-    },
-    "tools.web.x_search.enabled": {
-      label: "Enable X Search Tool",
-      help: "Enable the x_search tool (requires XAI_API_KEY or tools.web.x_search.apiKey).",
-      tags: ["tools"],
-    },
-    "tools.web.x_search.apiKey": {
-      label: "xAI API Key",
-      help: "xAI API key for X search (fallback: XAI_API_KEY env var).",
-      tags: ["security", "auth", "tools"],
-      sensitive: true,
-    },
-    "tools.web.x_search.model": {
-      label: "X Search Model",
-      help: 'Model to use for X search (default: "grok-4-1-fast-non-reasoning").',
-      tags: ["models", "tools"],
-    },
-    "tools.web.x_search.inlineCitations": {
-      label: "X Search Inline Citations",
-      help: "Keep inline citations from xAI in x_search responses when available (default: false).",
-      tags: ["tools"],
-    },
-    "tools.web.x_search.maxTurns": {
-      label: "X Search Max Turns",
-      help: "Optional max internal search/tool turns xAI may use per x_search request. Omit to let xAI choose.",
-      tags: ["performance", "tools"],
-    },
-    "tools.web.x_search.timeoutSeconds": {
-      label: "X Search Timeout (sec)",
-      help: "Timeout in seconds for x_search requests.",
-      tags: ["performance", "tools"],
-    },
-    "tools.web.x_search.cacheTtlMinutes": {
-      label: "X Search Cache TTL (min)",
-      help: "Cache TTL in minutes for x_search results.",
-      tags: ["performance", "storage", "tools"],
     },
     "gateway.controlUi.basePath": {
       label: "Control UI Base Path",
@@ -12905,6 +12739,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       help: "Node command names to block even if present in node claims or default allowlist (exact command-name matching only, e.g. `system.run`; does not inspect shell text inside that command).",
       tags: ["access", "network"],
     },
+    "gateway.webchat.chatHistoryMaxChars": {
+      label: "WebChat History Max Chars",
+      help: "Max characters per text field in chat.history responses before truncation (default: 12000).",
+      tags: ["network", "performance"],
+    },
     "nodeHost.browserProxy": {
       label: "Node Browser Proxy",
       help: "Groups browser-proxy settings for exposing local browser control through node routing. Enable only when remote node workflows need your local browser profiles.",
@@ -13044,26 +12883,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       label: "Broadcast Destination List",
       help: "Per-source broadcast destination list where each key is a source peer ID and the value is an array of destination peer IDs. Keep lists intentional to avoid accidental message amplification.",
       tags: ["advanced"],
-    },
-    "skills.load.promptPathAliases": {
-      label: "Skill Prompt Path Aliases",
-      help: "Optional prompt-facing path alias rules for skill locations. Use these when skills are discovered from a host or gateway path but must be read through a different runtime-visible path such as a sandbox bind mount.",
-      tags: ["storage"],
-    },
-    "skills.load.promptPathAliases[].from": {
-      label: "Skill Prompt Alias Source Prefix",
-      help: "Canonical source path prefix to match against discovered SKILL.md locations before rendering the skills prompt. This should point at the host or gateway-visible directory returned by skill discovery, for example `/home/node/.openclaw/shared/skills`.",
-      tags: ["storage"],
-    },
-    "skills.load.promptPathAliases[].to": {
-      label: "Skill Prompt Alias Target Prefix",
-      help: "Replacement path prefix shown to the agent in the skills prompt when a matching source path is found. Point this at the runtime-visible location the read tool can actually open, for example `/shared/skills` inside a sandbox.",
-      tags: ["storage"],
-    },
-    "skills.load.promptPathAliases[].when": {
-      label: "Skill Prompt Alias Scope",
-      help: 'Controls when the alias applies: `"always"` rewrites prompt locations in every run, while `"sandbox"` only rewrites them for sandboxed sessions.',
-      tags: ["storage"],
     },
     "skills.load.watch": {
       label: "Watch Skills",
@@ -13752,6 +13571,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       help: "Fixed delay in milliseconds before retrying an overloaded provider/profile rotation (default: 0).",
       tags: ["auth", "access", "reliability", "storage"],
     },
+    "auth.cooldowns.rateLimitedProfileRotations": {
+      label: "Rate-Limited Profile Rotations",
+      help: "Maximum same-provider auth-profile rotations allowed for rate-limit errors before switching to model fallback (default: 1).",
+      tags: ["auth", "access", "performance", "storage"],
+    },
     "agents.defaults.models": {
       label: "Models",
       help: "Configured model catalog (keys are full provider/model IDs).",
@@ -13917,6 +13741,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       help: "When enabled, rewrites the session JSONL file after compaction to remove entries that were summarized. Prevents unbounded file growth in long-running sessions with many compaction cycles. Default: false.",
       tags: ["advanced"],
     },
+    "agents.defaults.compaction.notifyUser": {
+      label: "Compaction Notify User",
+      help: "When enabled, sends a brief compaction notice to the user (e.g. '🧹 Compacting context...') when compaction starts. Disabled by default to keep compaction silent and non-intrusive.",
+      tags: ["advanced"],
+    },
     "agents.defaults.compaction.memoryFlush": {
       label: "Compaction Memory Flush",
       help: "Pre-compaction memory flush settings that run an agentic memory write before heavy compaction. Keep enabled for long sessions so salient context is persisted before aggressive trimming.",
@@ -13986,11 +13815,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       label: "Sandbox Docker Allow Container Namespace Join",
       help: "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
       tags: ["security", "access", "storage", "advanced"],
-    },
-    "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges": {
-      label: "Sandbox Docker Disable No New Privileges",
-      help: "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
-      tags: ["security", "storage", "advanced"],
     },
     "commands.native": {
       label: "Native Commands",
@@ -14322,31 +14146,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       label: "Thread Binding Max Age (hours)",
       help: "Optional hard max age in hours for thread-bound sessions across providers/channels (0 disables hard cap). Default: 0.",
       tags: ["performance", "storage"],
-    },
-    "session.writeLock": {
-      label: "Session Write Lock",
-      help: "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
-      tags: ["storage"],
-    },
-    "session.writeLock.timeoutMs": {
-      label: "Session Write Lock Timeout (ms)",
-      help: "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
-      tags: ["performance", "storage"],
-    },
-    "session.writeLock.backoffBaseMs": {
-      label: "Session Write Lock Backoff Base (ms)",
-      help: "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
-      tags: ["reliability", "storage"],
-    },
-    "session.writeLock.backoffCapMs": {
-      label: "Session Write Lock Backoff Cap (ms)",
-      help: "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
-      tags: ["reliability", "storage"],
-    },
-    "session.writeLock.backoffJitterMs": {
-      label: "Session Write Lock Backoff Jitter (ms)",
-      help: "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
-      tags: ["reliability", "storage"],
     },
     "session.maintenance": {
       label: "Session Maintenance",
@@ -15141,11 +14940,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       help: "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
       tags: ["security", "access", "storage", "advanced"],
     },
-    "agents.list[].sandbox.docker.dangerouslyDisableNoNewPrivileges": {
-      label: "Agent Sandbox Docker Disable No New Privileges",
-      help: "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
-      tags: ["security", "storage", "advanced"],
-    },
     "discovery.mdns.mode": {
       label: "mDNS Discovery Mode",
       help: 'mDNS broadcast mode ("minimal" default, "full" includes cliPath/sshPort, "off" disables mDNS).',
@@ -15357,6 +15151,10 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       sensitive: true,
       tags: ["security", "auth", "tools"],
     },
+    "tools.web.fetch.firecrawl.apiKey": {
+      sensitive: true,
+      tags: ["security", "auth", "tools"],
+    },
     "mcp.servers.*.headers.*": {
       sensitive: true,
       tags: ["security"],
@@ -15367,6 +15165,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
     },
     "agents.list[].memorySearch.remote.baseUrl": {
       tags: ["advanced", "url-secret"],
+    },
+    "tools.web.fetch.firecrawl.baseUrl": {
+      tags: ["tools", "url-secret"],
     },
     "tools.media.models[].baseUrl": {
       tags: ["media", "tools", "url-secret"],
@@ -15393,6 +15194,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       tags: ["advanced", "url-secret"],
     },
   },
-  version: "2026.4.1",
+  version: "2026.4.2",
   generatedAt: "2026-03-22T21:17:33.302Z",
 } as const satisfies BaseConfigSchemaResponse;

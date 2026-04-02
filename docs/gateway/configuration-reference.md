@@ -923,6 +923,7 @@ Time format in system prompt. Default: `auto` (OS preference).
         primary: "anthropic/claude-opus-4-6",
         fallbacks: ["openai/gpt-5-mini"],
       },
+      params: { cacheRetention: "long" }, // global default provider params
       pdfMaxBytesMb: 10,
       pdfMaxPages: 20,
       thinkingDefault: "low",
@@ -957,7 +958,8 @@ Time format in system prompt. Default: `auto` (OS preference).
 - `elevatedDefault`: default elevated-output level for agents. Values: `"off"`, `"on"`, `"ask"`, `"full"`. Default: `"on"`.
 - `model.primary`: format `provider/model` (e.g. `anthropic/claude-opus-4-6`). If you omit the provider, OpenClaw assumes `anthropic` (deprecated).
 - `models`: the configured model catalog and allowlist for `/model`. Each entry can include `alias` (shortcut) and `params` (provider-specific, for example `temperature`, `maxTokens`, `cacheRetention`, `context1m`).
-- `params` merge precedence (config): `agents.defaults.models["provider/model"].params` is the base, then `agents.list[].params` (matching agent id) overrides by key.
+- `params`: global default provider parameters applied to all models. Set at `agents.defaults.params` (e.g. `{ cacheRetention: "long" }`).
+- `params` merge precedence (config): `agents.defaults.params` (global base) is overridden by `agents.defaults.models["provider/model"].params` (per-model), then `agents.list[].params` (matching agent id) overrides by key. See [Prompt Caching](/reference/prompt-caching) for details.
 - Config writers that mutate these fields (for example `/models set`, `/models set-image`, and fallback add/remove commands) save canonical object form and preserve existing fallback lists when possible.
 - `maxConcurrent`: max parallel agent runs across sessions (each session still serialized). Default: 4.
 
@@ -1062,6 +1064,7 @@ Periodic heartbeat runs.
         identifierInstructions: "Preserve deployment IDs, ticket IDs, and host:port pairs exactly.", // used when identifierPolicy=custom
         postCompactionSections: ["Session Startup", "Red Lines"], // [] disables reinjection
         model: "openrouter/anthropic/claude-sonnet-4-6", // optional compaction-only model override
+        notifyUser: true, // send a brief notice when compaction starts (default: false)
         memoryFlush: {
           enabled: true,
           softThresholdTokens: 6000,
@@ -1080,6 +1083,7 @@ Periodic heartbeat runs.
 - `identifierInstructions`: optional custom identifier-preservation text used when `identifierPolicy=custom`.
 - `postCompactionSections`: optional AGENTS.md H2/H3 section names to re-inject after compaction. Defaults to `["Session Startup", "Red Lines"]`; set `[]` to disable reinjection. When unset or explicitly set to that default pair, older `Every Session`/`Safety` headings are also accepted as a legacy fallback.
 - `model`: optional `provider/model-id` override for compaction summarization only. Use this when the main session should keep one model but compaction summaries should run on another; when unset, compaction uses the session's primary model.
+- `notifyUser`: when `true`, sends a brief notice to the user when compaction starts (for example, "Compacting context..."). Disabled by default to keep compaction silent.
 - `memoryFlush`: silent agentic turn before auto-compaction to store durable memories. Skipped when workspace is read-only.
 
 ### `agents.defaults.contextPruning`
@@ -2423,13 +2427,6 @@ See [Local Models](/gateway/local-models). TL;DR: run a large local model via LM
   skills: {
     allowBundled: ["gemini", "peekaboo"],
     load: {
-      promptPathAliases: [
-        {
-          from: "/home/node/.openclaw/shared/skills",
-          to: "/shared/skills",
-          when: "sandbox",
-        },
-      ],
       extraDirs: ["~/Projects/agent-scripts/skills"],
     },
     install: {
@@ -2449,10 +2446,6 @@ See [Local Models](/gateway/local-models). TL;DR: run a large local model via LM
 ```
 
 - `allowBundled`: optional allowlist for bundled skills only (managed/workspace skills unaffected).
-- `load.promptPathAliases`: optional prompt-facing path rewrites for discovered skill locations.
-- `load.promptPathAliases[].from`: source path prefix to match against canonical skill locations.
-- `load.promptPathAliases[].to`: replacement path prefix shown to agents in the skills prompt.
-- `load.promptPathAliases[].when`: apply the alias in all runs or only sandboxed runs (`always` or `sandbox`).
 - `entries.<skillKey>.enabled: false` disables a skill even if bundled/installed.
 - `entries.<skillKey>.apiKey`: convenience for skills declaring a primary env var (plaintext string or SecretRef object).
 
@@ -3042,6 +3035,7 @@ Notes:
       failureWindowHours: 24,
       overloadedProfileRotations: 1,
       overloadedBackoffMs: 0,
+      rateLimitedProfileRotations: 1,
     },
   },
 }
@@ -3053,6 +3047,7 @@ Notes:
 - `failureWindowHours`: rolling window in hours used for backoff counters (default: `24`).
 - `overloadedProfileRotations`: maximum same-provider auth-profile rotations for overloaded errors before switching to model fallback (default: `1`).
 - `overloadedBackoffMs`: fixed delay before retrying an overloaded provider/profile rotation (default: `0`).
+- `rateLimitedProfileRotations`: maximum same-provider auth-profile rotations for rate-limit errors before switching to model fallback (default: `1`).
 
 ---
 

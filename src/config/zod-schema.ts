@@ -452,6 +452,7 @@ export const OpenClawSchema = z
             failureWindowHours: z.number().positive().optional(),
             overloadedProfileRotations: z.number().int().nonnegative().optional(),
             overloadedBackoffMs: z.number().int().nonnegative().optional(),
+            rateLimitedProfileRotations: z.number().int().nonnegative().optional(),
           })
           .strict()
           .optional(),
@@ -728,6 +729,12 @@ export const OpenClawSchema = z
           })
           .strict()
           .optional(),
+        webchat: z
+          .object({
+            chatHistoryMaxChars: z.number().int().positive().max(500_000).optional(),
+          })
+          .strict()
+          .optional(),
         channelHealthCheckMinutes: z.number().int().min(0).optional(),
         channelStaleEventThresholdMinutes: z.number().int().min(1).optional(),
         channelMaxRestartsPerHour: z.number().int().min(1).optional(),
@@ -892,17 +899,6 @@ export const OpenClawSchema = z
         allowBundled: z.array(z.string()).optional(),
         load: z
           .object({
-            promptPathAliases: z
-              .array(
-                z
-                  .object({
-                    from: z.string(),
-                    to: z.string(),
-                    when: z.union([z.literal("always"), z.literal("sandbox")]).optional(),
-                  })
-                  .strict(),
-              )
-              .optional(),
             extraDirs: z.array(z.string()).optional(),
             watch: z.boolean().optional(),
             watchDebounceMs: z.number().int().min(0).optional(),
