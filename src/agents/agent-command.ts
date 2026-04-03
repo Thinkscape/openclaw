@@ -505,7 +505,6 @@ async function agentCommandInternal(
           config: cfg,
           eligibility: { remote: getRemoteSkillEligibility() },
           snapshotVersion: skillsSnapshotVersion,
-          sessionKey,
           skillFilter,
         })
       : sessionEntry?.skillsSnapshot;

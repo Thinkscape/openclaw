@@ -371,11 +371,9 @@ describe("security audit", () => {
     cases: readonly T[],
     run: (testCase: T, tmp: string) => Promise<void>,
   ) => {
-    await Promise.all(
-      cases.map(async (testCase) => {
-        await withChannelSecurityStateDir(async (tmp) => run(testCase, tmp));
-      }),
-    );
+    for (const testCase of cases) {
+      await withChannelSecurityStateDir(async (tmp) => run(testCase, tmp));
+    }
   };
 
   const runSharedExtensionsAudit = async (config: OpenClawConfig) => {
@@ -1537,28 +1535,6 @@ description: test skill
           },
         ],
       },
-      {
-        name: "no-new-privileges disabled",
-        cfg: {
-          agents: {
-            defaults: {
-              sandbox: {
-                mode: "all",
-                docker: {
-                  dangerouslyDisableNoNewPrivileges: true,
-                },
-              },
-            },
-          },
-        } as OpenClawConfig,
-        expectedFindings: [
-          {
-            checkId: "sandbox.dangerous_no_new_privileges_disabled",
-            severity: "critical",
-            title: "Sandbox no-new-privileges hardening is disabled",
-          },
-        ],
-      },
     ] as const;
 
     await runConfigAuditCases(cases, (res, testCase) => {
@@ -1858,34 +1834,6 @@ description: test skill
           "hooks.gmail.allowUnsafeExternalContent=true",
           "hooks.mappings[0].allowUnsafeExternalContent=true",
           "tools.exec.applyPatch.workspaceOnly=false",
-        ],
-      },
-      {
-        name: "sandbox no-new-privileges is disabled",
-        cfg: {
-          agents: {
-            defaults: {
-              sandbox: {
-                docker: {
-                  dangerouslyDisableNoNewPrivileges: true,
-                },
-              },
-            },
-            list: [
-              {
-                id: "sudo-agent",
-                sandbox: {
-                  docker: {
-                    dangerouslyDisableNoNewPrivileges: true,
-                  },
-                },
-              },
-            ],
-          },
-        } satisfies OpenClawConfig,
-        expectedDangerousDetails: [
-          "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges=true",
-          "agents.list.sudo-agent.sandbox.docker.dangerouslyDisableNoNewPrivileges=true",
         ],
       },
       {

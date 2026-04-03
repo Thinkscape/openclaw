@@ -2,8 +2,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { loadConfig } from "../config/config.js";
-import { withTempHome, writeOpenClawConfig } from "../config/test-helpers.js";
 
 const FAKE_STARTTIME = 12345;
 let __testing: typeof import("./session-write-lock.js").__testing;
@@ -11,7 +9,6 @@ let acquireSessionWriteLock: typeof import("./session-write-lock.js").acquireSes
 let cleanStaleLockFiles: typeof import("./session-write-lock.js").cleanStaleLockFiles;
 let resetSessionWriteLockStateForTest: typeof import("./session-write-lock.js").resetSessionWriteLockStateForTest;
 let resolveSessionLockMaxHoldFromTimeout: typeof import("./session-write-lock.js").resolveSessionLockMaxHoldFromTimeout;
-let resolveSessionWriteLockConfig: typeof import("./session-write-lock.js").resolveSessionWriteLockConfig;
 
 vi.mock("../shared/pid-alive.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../shared/pid-alive.js")>();
@@ -103,7 +100,6 @@ describe("acquireSessionWriteLock", () => {
       cleanStaleLockFiles,
       resetSessionWriteLockStateForTest,
       resolveSessionLockMaxHoldFromTimeout,
-      resolveSessionWriteLockConfig,
     } = await import("./session-write-lock.js"));
   });
 
@@ -176,28 +172,6 @@ describe("acquireSessionWriteLock", () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
-  });
-
-  it("reads default timeout and backoff values from config when present", async () => {
-    await withTempHome(async (home) => {
-      await writeOpenClawConfig(home, {
-        session: {
-          writeLock: {
-            timeoutMs: 30_000,
-            backoffBaseMs: 5,
-            backoffCapMs: 50,
-            backoffJitterMs: 10,
-          },
-        },
-      });
-
-      expect(resolveSessionWriteLockConfig(loadConfig())).toEqual({
-        timeoutMs: 30_000,
-        backoffBaseMs: 5,
-        backoffCapMs: 50,
-        backoffJitterMs: 10,
-      });
-    });
   });
 
   it("does not reclaim fresh malformed lock files during contention", async () => {

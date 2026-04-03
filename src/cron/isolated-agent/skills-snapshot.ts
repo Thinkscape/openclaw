@@ -9,7 +9,6 @@ export function resolveCronSkillsSnapshot(params: {
   workspaceDir: string;
   config: OpenClawConfig;
   agentId: string;
-  sessionKey?: string;
   existingSnapshot?: SkillSnapshot;
   isFastTestEnv: boolean;
 }): SkillSnapshot {
@@ -33,7 +32,6 @@ export function resolveCronSkillsSnapshot(params: {
     config: params.config,
     skillFilter,
     eligibility: { remote: getRemoteSkillEligibility() },
-    sessionKey: params.sessionKey,
     snapshotVersion,
   });
 }
