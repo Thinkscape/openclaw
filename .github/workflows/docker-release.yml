@@ -165,6 +165,9 @@ jobs:
           provenance: false
           push: true
 
+      - name: Reclaim amd64 buildx cache before slim build
+        run: docker buildx prune -af
+
       - name: Build and push amd64 slim image
         id: build-slim
         # WARNING: KEEP THE OFFICIAL DOCKER ACTION HERE; DO NOT SWITCH THIS BACK TO BLACKSMITH BLINDLY.
