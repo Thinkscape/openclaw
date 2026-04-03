@@ -3096,6 +3096,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                       dangerouslyAllowContainerNamespaceJoin: {
                         type: "boolean",
                       },
+                      dangerouslyDisableNoNewPrivileges: {
+                        type: "boolean",
+                      },
                     },
                     additionalProperties: false,
                   },
@@ -4278,6 +4281,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                           type: "boolean",
                         },
                         dangerouslyAllowContainerNamespaceJoin: {
+                          type: "boolean",
+                        },
+                        dangerouslyDisableNoNewPrivileges: {
                           type: "boolean",
                         },
                       },
@@ -13897,6 +13903,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       help: "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
       tags: ["security", "access", "storage", "advanced"],
     },
+    "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges": {
+      label: "Sandbox Docker Disable No New Privileges",
+      help: "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
+      tags: ["security", "storage", "advanced"],
+    },
     "commands.native": {
       label: "Native Commands",
       help: "Registers native slash/menu commands with channels that support command registration (Discord, Slack, Telegram). Keep enabled for discoverability unless you intentionally run text-only command workflows.",
@@ -15045,6 +15056,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       label: "Agent Sandbox Docker Allow Container Namespace Join",
       help: "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
       tags: ["security", "access", "storage", "advanced"],
+    },
+    "agents.list[].sandbox.docker.dangerouslyDisableNoNewPrivileges": {
+      label: "Agent Sandbox Docker Disable No New Privileges",
+      help: "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
+      tags: ["security", "storage", "advanced"],
     },
     "discovery.mdns.mode": {
       label: "mDNS Discovery Mode",
