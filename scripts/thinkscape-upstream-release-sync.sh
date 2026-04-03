@@ -24,8 +24,6 @@ PATCH_REFS=(
   "${PATCH_REF_SKILL_PROMPT_ALIAS}"
 )
 
-OPTIONAL_PATCH_REFS=()
-
 log() {
   printf '[release-sync] %s\n' "$*"
 }
@@ -93,19 +91,6 @@ fail_with_issue() {
   maybe_assign_issue_to_copilot "${issue_number}"
   printf 'Opened or updated issue #%s for failure: %s\n' "${issue_number}" "${phase}" >&2
   exit 1
-}
-
-is_optional_patch_ref() {
-  local patch_ref="$1"
-  local optional_patch_ref
-
-  for optional_patch_ref in "${OPTIONAL_PATCH_REFS[@]}"; do
-    if [[ "${patch_ref}" == "${optional_patch_ref}" ]]; then
-      return 0
-    fi
-  done
-
-  return 1
 }
 
 verify_version_alignment() {
@@ -332,27 +317,10 @@ main() {
     git commit --no-verify -m "chore(release-sync): stage upstream snapshot for ${release_tag}"
   fi
 
-  local optional_patch_ref
-  for optional_patch_ref in "${OPTIONAL_PATCH_REFS[@]}"; do
-    if [[ -z "${optional_patch_ref}" ]]; then
-      continue
-    fi
-    if git rev-parse -q --verify "${optional_patch_ref}^{commit}" >/dev/null 2>&1; then
-      PATCH_REFS+=("${optional_patch_ref}")
-    else
-      log "Optional patch ref ${optional_patch_ref} not found; skipping"
-    fi
-  done
-
   local patch_ref
   for patch_ref in "${PATCH_REFS[@]}"; do
     log "Cherry-picking patch ref ${patch_ref}"
     if ! git cherry-pick "${patch_ref}"; then
-      if is_optional_patch_ref "${patch_ref}"; then
-        log "Optional patch ref ${patch_ref} conflicted for ${release_tag}; skipping"
-        git cherry-pick --abort || true
-        continue
-      fi
       local detail_file
       detail_file="$(mktemp)"
       {
