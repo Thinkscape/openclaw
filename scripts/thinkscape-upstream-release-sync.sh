@@ -20,12 +20,11 @@ WORKFLOW_MAX_POLLS="${WORKFLOW_MAX_POLLS:-240}"
 PATCH_REFS=(
   "${PATCH_REF_SUBAGENT}"
   "${PATCH_REF_SESSION_LOCK}"
+  "${PATCH_REF_SANDBOX_NO_NEW_PRIVILEGES}"
   "${PATCH_REF_SKILL_PROMPT_ALIAS}"
 )
 
-OPTIONAL_PATCH_REFS=(
-  "${PATCH_REF_SANDBOX_NO_NEW_PRIVILEGES}"
-)
+OPTIONAL_PATCH_REFS=()
 
 log() {
   printf '[release-sync] %s\n' "$*"
@@ -157,18 +156,21 @@ cancel_inflight_docker_release_runs() {
 dispatch_docker_release() {
   local release_tag="$1"
   local dispatched_at="$2"
-  gh api \
-    --method POST \
-    "repos/${FORK_REPO}/actions/workflows/${DOCKER_RELEASE_WORKFLOW}/dispatches" \
-    -f ref="${DEFAULT_BRANCH}" \
-    -F inputs[tag]="${release_tag}" \
+  gh workflow run "${DOCKER_RELEASE_WORKFLOW}" \
+    --repo "${FORK_REPO}" \
+    --ref "${DEFAULT_BRANCH}" \
+    -f "tag=${release_tag}" \
     >/dev/null
 
   local run_id=""
   for _ in $(seq 1 30); do
-    run_id="$(gh api \
-      "repos/${FORK_REPO}/actions/workflows/${DOCKER_RELEASE_WORKFLOW}/runs?event=workflow_dispatch&per_page=20" | \
-      jq -r --arg after "${dispatched_at}" '.workflow_runs | map(select(.created_at >= $after)) | sort_by(.created_at) | last.id // empty')"
+    run_id="$(gh run list \
+      --repo "${FORK_REPO}" \
+      --workflow "Docker Release" \
+      --event workflow_dispatch \
+      --limit 20 \
+      --json databaseId,createdAt | \
+      jq -r --arg after "${dispatched_at}" 'map(select(.createdAt >= $after)) | sort_by(.createdAt) | last.databaseId // empty')"
     if [[ -n "${run_id}" ]]; then
       printf '%s\n' "${run_id}"
       return 0
@@ -231,6 +233,8 @@ EOF
 verify_published_images() {
   local version="$1"
   local detail_file
+  local latest_digest=""
+  local version_digest=""
 
   if ! docker buildx imagetools inspect "${TARGET_IMAGE}:${version}" >/dev/null 2>&1; then
     detail_file="$(mktemp)"
@@ -241,6 +245,23 @@ Expected published image is missing after Docker Release completed.
 - note: version tag should be published before latest
 EOF
     fail_with_issue "published image verification" "v${version}" "${detail_file}"
+  fi
+
+  if [[ "${version}" =~ ^[0-9]{4}\.[1-9][0-9]*\.[1-9][0-9]*(-beta\.[1-9][0-9]*)?$ ]]; then
+    version_digest="$(docker buildx imagetools inspect "${TARGET_IMAGE}:${version}" | sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)"
+    latest_digest="$(docker buildx imagetools inspect "${TARGET_IMAGE}:latest" | sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)"
+    if [[ -z "${version_digest}" || -z "${latest_digest}" || "${version_digest}" != "${latest_digest}" ]]; then
+      detail_file="$(mktemp)"
+      cat >"${detail_file}" <<EOF
+Latest tag does not point at the rebuilt upstream release manifest.
+
+- image: ${TARGET_IMAGE}:${version}
+- version digest: ${version_digest:-<missing>}
+- latest digest: ${latest_digest:-<missing>}
+EOF
+      fail_with_issue "latest digest verification" "v${version}" "${detail_file}"
+    fi
+    return 0
   fi
 
   if ! docker buildx imagetools inspect "${TARGET_IMAGE}:latest" >/dev/null 2>&1; then
@@ -262,6 +283,7 @@ main() {
   require_cmd docker
 
   local release_tag="${RELEASE_TAG}"
+  local explicit_release_tag="${RELEASE_TAG}"
   if [[ -z "${release_tag}" ]]; then
     release_tag="$(latest_upstream_release_tag)"
   fi
@@ -295,7 +317,7 @@ main() {
   local remote_branch_sha remote_tag_sha
   remote_branch_sha="$(git ls-remote origin "refs/heads/${release_branch}" | awk '{print $1}')"
   remote_tag_sha="$(git ls-remote origin "refs/tags/${release_tag}^{}" | awk '{print $1}')"
-  if [[ -n "${remote_branch_sha}" && -n "${remote_tag_sha}" && "${remote_branch_sha}" == "${remote_tag_sha}" ]]; then
+  if [[ -z "${explicit_release_tag}" && -n "${remote_branch_sha}" && -n "${remote_tag_sha}" && "${remote_branch_sha}" == "${remote_tag_sha}" ]]; then
     if docker buildx imagetools inspect "${TARGET_IMAGE}:${release_version}" >/dev/null 2>&1; then
       log "Fork release ${release_tag} is already published at ${TARGET_IMAGE}:${release_version}; skipping"
       exit 0
