@@ -167,8 +167,8 @@ dispatch_docker_release() {
   local run_id=""
   for _ in $(seq 1 30); do
     run_id="$(gh api \
-      "repos/${FORK_REPO}/actions/workflows/${DOCKER_RELEASE_WORKFLOW}/runs?event=workflow_dispatch&per_page=20" \
-      --jq --arg after "${dispatched_at}" '.workflow_runs | map(select(.created_at >= $after)) | sort_by(.created_at) | last.id // empty')"
+      "repos/${FORK_REPO}/actions/workflows/${DOCKER_RELEASE_WORKFLOW}/runs?event=workflow_dispatch&per_page=20" | \
+      jq -r --arg after "${dispatched_at}" '.workflow_runs | map(select(.created_at >= $after)) | sort_by(.created_at) | last.id // empty')"
     if [[ -n "${run_id}" ]]; then
       printf '%s\n' "${run_id}"
       return 0
