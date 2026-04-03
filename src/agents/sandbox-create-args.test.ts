@@ -164,6 +164,21 @@ describe("buildSandboxCreateArgs", () => {
     );
   });
 
+  it("omits no-new-privileges only when explicitly disabled", () => {
+    const args = buildSandboxCreateArgs({
+      name: "openclaw-sbx-sudo",
+      cfg: createSandboxConfig({
+        dangerouslyDisableNoNewPrivileges: true,
+        seccompProfile: "/tmp/seccomp.json",
+      }),
+      scopeKey: "main",
+      createdAtMs: 1700000000000,
+    });
+
+    expect(args).not.toEqual(expect.arrayContaining(["--security-opt", "no-new-privileges"]));
+    expect(args).toEqual(expect.arrayContaining(["--security-opt", "seccomp=/tmp/seccomp.json"]));
+  });
+
   it("emits -v flags for safe custom binds", () => {
     const cfg: SandboxDockerConfig = {
       image: "openclaw-sandbox:bookworm-slim",
