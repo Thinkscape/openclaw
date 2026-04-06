@@ -27,15 +27,5 @@ export function collectEnabledInsecureOrDangerousFlags(cfg: OpenClawConfig): str
   if (cfg.plugins?.entries?.acpx?.config?.permissionMode === "approve-all") {
     enabledFlags.push("plugins.entries.acpx.config.permissionMode=approve-all");
   }
-  if (cfg.agents?.defaults?.sandbox?.docker?.dangerouslyDisableNoNewPrivileges === true) {
-    enabledFlags.push("agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges=true");
-  }
-  for (const entry of cfg.agents?.list ?? []) {
-    if (entry?.id && entry.sandbox?.docker?.dangerouslyDisableNoNewPrivileges === true) {
-      enabledFlags.push(
-        `agents.list.${entry.id}.sandbox.docker.dangerouslyDisableNoNewPrivileges=true`,
-      );
-    }
-  }
   return enabledFlags;
 }

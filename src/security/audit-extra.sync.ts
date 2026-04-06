@@ -23,8 +23,7 @@ import {
   DEFAULT_DANGEROUS_NODE_COMMANDS,
   resolveNodeCommandAllowlist,
 } from "../gateway/node-command-policy.js";
-import { resolveBrowserConfig } from "../plugin-sdk/browser-runtime.js";
-import { hasBundledWebSearchCredential } from "../plugins/bundled-web-search-registry.js";
+import { hasConfiguredWebSearchCredential } from "../plugins/web-search-credential-presence.js";
 import { inferParamBFromIdOrName } from "../shared/model-param-b.js";
 import { pickSandboxToolPolicy } from "./audit-tool-policy.js";
 
@@ -327,7 +326,12 @@ function resolveToolPolicies(params: {
 }
 
 function hasWebSearchKey(cfg: OpenClawConfig, env: NodeJS.ProcessEnv): boolean {
-  return hasBundledWebSearchCredential({ config: cfg, env });
+  return hasConfiguredWebSearchCredential({
+    config: cfg,
+    env,
+    origin: "bundled",
+    bundledAllowlistCompat: true,
+  });
 }
 
 function isWebSearchEnabled(cfg: OpenClawConfig, env: NodeJS.ProcessEnv): boolean {
@@ -350,11 +354,9 @@ function isWebFetchEnabled(cfg: OpenClawConfig): boolean {
 }
 
 function isBrowserEnabled(cfg: OpenClawConfig): boolean {
-  try {
-    return resolveBrowserConfig(cfg.browser, cfg).enabled;
-  } catch {
-    return true;
-  }
+  // The audit only needs the enablement policy, not full browser runtime
+  // resolution. Browser defaults to enabled unless it is explicitly disabled.
+  return cfg.browser?.enabled !== false;
 }
 
 function listGroupPolicyOpen(cfg: OpenClawConfig): string[] {
@@ -931,20 +933,6 @@ export function collectSandboxDangerousConfigFindings(cfg: OpenClawConfig): Secu
         title: "AppArmor unconfined in sandbox config",
         detail: `${source}.apparmorProfile is "unconfined" which disables AppArmor enforcement.`,
         remediation: `Remove ${source}.apparmorProfile or use a named AppArmor profile.`,
-      });
-    }
-
-    if (docker.dangerouslyDisableNoNewPrivileges === true) {
-      findings.push({
-        checkId: "sandbox.dangerous_no_new_privileges_disabled",
-        severity: "critical",
-        title: "Sandbox no-new-privileges hardening is disabled",
-        detail:
-          `${source}.dangerouslyDisableNoNewPrivileges=true disables Docker's no-new-privileges ` +
-          "guard and allows setuid elevation such as sudo inside sandbox containers.",
-        remediation:
-          `Remove ${source}.dangerouslyDisableNoNewPrivileges or set it to false unless sandbox ` +
-          "privilege escalation is intentionally required.",
       });
     }
   }
