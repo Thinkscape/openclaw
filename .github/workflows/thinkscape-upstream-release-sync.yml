@@ -51,6 +51,8 @@ jobs:
       - name: Sync upstream release into Thinkscape fork
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOME: ${{ runner.temp }}/openclaw-release-sync-home
+          OPENCLAW_STATE_DIR: ${{ runner.temp }}/openclaw-release-sync-home/.openclaw
           RELEASE_TAG: ${{ inputs.tag }}
           SYNC_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
           COPILOT_ASSIGNMENT_TOKEN: ${{ secrets.COPILOT_ASSIGNMENT_TOKEN }}
@@ -58,4 +60,6 @@ jobs:
           PATCH_REF_SESSION_LOCK: thinkscape-patch-session-write-lock
           PATCH_REF_SANDBOX_NO_NEW_PRIVILEGES: thinkscape-patch-sandbox-no-new-privileges
           PATCH_REF_SKILL_PROMPT_ALIAS: thinkscape-patch-skill-prompt-path-alias
-        run: bash scripts/thinkscape-upstream-release-sync.sh
+        run: |
+          mkdir -p "$HOME/.openclaw"
+          bash scripts/thinkscape-upstream-release-sync.sh
