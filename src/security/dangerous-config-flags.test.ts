@@ -37,6 +37,44 @@ describe("collectEnabledInsecureOrDangerousFlags", () => {
     ).toContain("plugins.entries.acpx.config.permissionMode=approve-all");
   });
 
+  it("collects sandbox no-new-privileges dangerous flags", () => {
+    loadPluginManifestRegistryMock.mockReturnValue({
+      plugins: [],
+      diagnostics: [],
+    });
+
+    expect(
+      collectEnabledInsecureOrDangerousFlags(
+        asConfig({
+          agents: {
+            defaults: {
+              sandbox: {
+                docker: {
+                  dangerouslyDisableNoNewPrivileges: true,
+                },
+              },
+            },
+            list: [
+              {
+                id: "sudo-agent",
+                sandbox: {
+                  docker: {
+                    dangerouslyDisableNoNewPrivileges: true,
+                  },
+                },
+              },
+            ],
+          },
+        }),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges=true",
+        "agents.list.sudo-agent.sandbox.docker.dangerouslyDisableNoNewPrivileges=true",
+      ]),
+    );
+  });
+
   it("ignores plugin config values that are not declared as dangerous", () => {
     expect(
       collectEnabledInsecureOrDangerousFlagsFromContracts(
