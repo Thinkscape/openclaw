@@ -843,6 +843,20 @@ export function collectSandboxDangerousConfigFindings(cfg: OpenClawConfig): Secu
         remediation: `Remove ${source}.apparmorProfile or use a named AppArmor profile.`,
       });
     }
+
+    if (docker.dangerouslyDisableNoNewPrivileges === true) {
+      findings.push({
+        checkId: "sandbox.dangerous_no_new_privileges_disabled",
+        severity: "critical",
+        title: "Sandbox no-new-privileges hardening is disabled",
+        detail:
+          `${source}.dangerouslyDisableNoNewPrivileges=true disables Docker's no-new-privileges ` +
+          "guard and allows setuid elevation such as sudo inside sandbox containers.",
+        remediation:
+          `Remove ${source}.dangerouslyDisableNoNewPrivileges or set it to false unless sandbox ` +
+          "privilege escalation is intentionally required.",
+      });
+    }
   }
 
   // CDP source range is now auto-derived at runtime from the Docker network gateway
