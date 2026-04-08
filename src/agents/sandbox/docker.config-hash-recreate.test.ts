@@ -314,6 +314,62 @@ describe("ensureSandboxContainer config-hash recreation", () => {
     },
   );
 
+  it("recreates shared container when no-new-privileges override changes", async () => {
+    const workspaceDir = "/tmp/workspace";
+    const oldCfg = createSandboxConfig([]);
+    const newCfg = createSandboxConfig([]);
+    newCfg.docker.dangerouslyDisableNoNewPrivileges = true;
+
+    const oldHash = computeSandboxConfigHash({
+      docker: oldCfg.docker,
+      workspaceAccess: oldCfg.workspaceAccess,
+      workspaceDir,
+      agentWorkspaceDir: workspaceDir,
+      mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
+    });
+    const newHash = computeSandboxConfigHash({
+      docker: newCfg.docker,
+      workspaceAccess: newCfg.workspaceAccess,
+      workspaceDir,
+      agentWorkspaceDir: workspaceDir,
+      mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
+    });
+    expect(newHash).not.toBe(oldHash);
+
+    spawnState.labelHash = oldHash;
+    registryMocks.readRegistry.mockResolvedValue({
+      entries: [
+        {
+          containerName: "oc-test-shared",
+          sessionKey: "shared",
+          createdAtMs: 1,
+          lastUsedAtMs: 0,
+          image: newCfg.docker.image,
+          configHash: oldHash,
+        },
+      ],
+    });
+
+    await ensureSandboxContainer({
+      sessionKey: "agent:main:session-1",
+      workspaceDir,
+      agentWorkspaceDir: workspaceDir,
+      cfg: newCfg,
+    });
+
+    const dockerCalls = spawnState.calls.filter((call) => call.command === "docker");
+    expect(
+      dockerCalls.some(
+        (call) =>
+          call.args[0] === "rm" && call.args[1] === "-f" && call.args[2] === "oc-test-shared",
+      ),
+    ).toBe(true);
+    const createCall = dockerCalls.find((call) => call.args[0] === "create");
+    expect(createCall).toBeDefined();
+    expect(createCall?.args).toContain(`openclaw.configHash=${newHash}`);
+    expect(createCall?.args).not.toContain("no-new-privileges");
+  });
+
   it("stamps the mount format version label on created containers", async () => {
     const workspaceDir = "/tmp/workspace";
     const cfg = createSandboxConfig([]);
