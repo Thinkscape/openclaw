@@ -148,6 +148,28 @@ describe("security audit sandbox docker config", () => {
             },
           ],
         },
+        {
+          name: "no-new-privileges disabled",
+          cfg: {
+            agents: {
+              defaults: {
+                sandbox: {
+                  mode: "all",
+                  docker: {
+                    dangerouslyDisableNoNewPrivileges: true,
+                  },
+                },
+              },
+            },
+          } as OpenClawConfig,
+          expectedFindings: [
+            {
+              checkId: "sandbox.dangerous_no_new_privileges_disabled",
+              severity: "critical",
+              title: "Sandbox no-new-privileges hardening is disabled",
+            },
+          ],
+        },
       ] as const;
 
       await Promise.all(
