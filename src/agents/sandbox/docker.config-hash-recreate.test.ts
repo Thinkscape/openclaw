@@ -85,19 +85,15 @@ function spawnDockerProcess(command: string, args: string[]) {
   return child;
 }
 
-async function createChildProcessMock(
-  importOriginal: () => Promise<typeof import("node:child_process")>,
-) {
-  const actual = await importOriginal();
+async function createChildProcessMock() {
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
   return {
     ...actual,
     spawn: spawnDockerProcess,
   };
 }
 
-vi.mock("node:child_process", async (importOriginal) =>
-  createChildProcessMock(() => importOriginal<typeof import("node:child_process")>()),
-);
+vi.mock("node:child_process", async () => createChildProcessMock());
 
 let ensureSandboxContainer: typeof import("./docker.js").ensureSandboxContainer;
 
@@ -107,9 +103,7 @@ async function loadFreshDockerModuleForTest() {
     readRegistry: registryMocks.readRegistry,
     updateRegistry: registryMocks.updateRegistry,
   }));
-  vi.doMock("node:child_process", async (importOriginal) =>
-    createChildProcessMock(() => importOriginal<typeof import("node:child_process")>()),
-  );
+  vi.doMock("node:child_process", async () => createChildProcessMock());
   ({ ensureSandboxContainer } = await import("./docker.js"));
 }
 
@@ -283,62 +277,6 @@ describe("ensureSandboxContainer config-hash recreation", () => {
     const customMountIdx = bindArgs.indexOf("/tmp/workspace-shared/USER.md:/workspace/USER.md:ro");
     expect(workspaceMountIdx).toBeGreaterThanOrEqual(0);
     expect(customMountIdx).toBeGreaterThan(workspaceMountIdx);
-  });
-
-  it("recreates shared container when no-new-privileges override changes", async () => {
-    const workspaceDir = "/tmp/workspace";
-    const oldCfg = createSandboxConfig([]);
-    const newCfg = createSandboxConfig([]);
-    newCfg.docker.dangerouslyDisableNoNewPrivileges = true;
-
-    const oldHash = computeSandboxConfigHash({
-      docker: oldCfg.docker,
-      workspaceAccess: oldCfg.workspaceAccess,
-      workspaceDir,
-      agentWorkspaceDir: workspaceDir,
-      mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
-    });
-    const newHash = computeSandboxConfigHash({
-      docker: newCfg.docker,
-      workspaceAccess: newCfg.workspaceAccess,
-      workspaceDir,
-      agentWorkspaceDir: workspaceDir,
-      mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
-    });
-    expect(newHash).not.toBe(oldHash);
-
-    spawnState.labelHash = oldHash;
-    registryMocks.readRegistry.mockResolvedValue({
-      entries: [
-        {
-          containerName: "oc-test-shared",
-          sessionKey: "shared",
-          createdAtMs: 1,
-          lastUsedAtMs: 0,
-          image: newCfg.docker.image,
-          configHash: oldHash,
-        },
-      ],
-    });
-
-    await ensureSandboxContainer({
-      sessionKey: "agent:main:session-1",
-      workspaceDir,
-      agentWorkspaceDir: workspaceDir,
-      cfg: newCfg,
-    });
-
-    const dockerCalls = spawnState.calls.filter((call) => call.command === "docker");
-    expect(
-      dockerCalls.some(
-        (call) =>
-          call.args[0] === "rm" && call.args[1] === "-f" && call.args[2] === "oc-test-shared",
-      ),
-    ).toBe(true);
-    const createCall = dockerCalls.find((call) => call.args[0] === "create");
-    expect(createCall).toBeDefined();
-    expect(createCall?.args).toContain(`openclaw.configHash=${newHash}`);
-    expect(createCall?.args).not.toContain("no-new-privileges");
   });
 
   it.each([

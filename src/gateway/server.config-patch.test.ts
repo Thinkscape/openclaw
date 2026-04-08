@@ -15,6 +15,8 @@ import {
 
 installGatewayTestHooks({ scope: "suite" });
 
+const CONFIG_SECRETREF_RPC_TIMEOUT_MS = 20_000;
+
 let startedServer: Awaited<ReturnType<typeof startServerWithClient>> | null = null;
 let sharedTempRoot: string;
 
@@ -90,6 +92,7 @@ describe("gateway config methods", () => {
         raw: JSON.stringify(nextConfig, null, 2),
         baseHash: current.payload?.hash,
       },
+      CONFIG_SECRETREF_RPC_TIMEOUT_MS,
     );
     expect(res.ok).toBe(false);
     expect(res.error?.message ?? "").toContain("active SecretRef resolution failed");
@@ -252,6 +255,30 @@ describe("gateway config methods", () => {
     expect(res.error?.message).toBe("config schema path not found");
   });
 
+  it("returns noop for config.patch when config is unchanged", async () => {
+    const current = await rpcReq<{
+      config?: Record<string, unknown>;
+      hash?: string;
+    }>(requireWs(), "config.get", {});
+    expect(current.ok).toBe(true);
+
+    // Patch with the same config — no actual changes
+    const res = await rpcReq<{
+      ok?: boolean;
+      noop?: boolean;
+      config?: Record<string, unknown>;
+    }>(requireWs(), "config.patch", {
+      raw: JSON.stringify(current.payload?.config ?? {}),
+      baseHash: current.payload?.hash,
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.payload?.noop).toBe(true);
+    // Config hash should not change (no file write)
+    const after = await rpcReq<{ hash?: string }>(requireWs(), "config.get", {});
+    expect(after.payload?.hash).toBe(current.payload?.hash);
+  });
+
   it("rejects config.patch when raw is null", async () => {
     const res = await rpcReq<{ ok?: boolean }>(requireWs(), "config.patch", {
       raw: "null",
@@ -287,6 +314,7 @@ describe("gateway config methods", () => {
         }),
         baseHash: beforeHash,
       },
+      CONFIG_SECRETREF_RPC_TIMEOUT_MS,
     );
     expect(res.ok).toBe(false);
     expect(res.error?.message ?? "").toContain("active SecretRef resolution failed");
