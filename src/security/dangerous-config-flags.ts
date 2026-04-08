@@ -50,6 +50,9 @@ export function collectEnabledInsecureOrDangerousFlags(cfg: OpenClawConfig): str
   if (cfg.tools?.fs?.workspaceOnly === false) {
     enabledFlags.push("tools.fs.workspaceOnly=false");
   }
+  if (cfg.agents?.defaults?.sandbox?.docker?.dangerouslyDisableNoNewPrivileges === true) {
+    enabledFlags.push("agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges=true");
+  }
   collectSandboxDockerDangerousFlags(
     isRecord(cfg.agents?.defaults?.sandbox?.docker)
       ? cfg.agents?.defaults?.sandbox?.docker
@@ -58,6 +61,11 @@ export function collectEnabledInsecureOrDangerousFlags(cfg: OpenClawConfig): str
   );
   if (Array.isArray(cfg.agents?.list)) {
     for (const [index, agent] of cfg.agents.list.entries()) {
+      if (agent?.id && agent.sandbox?.docker?.dangerouslyDisableNoNewPrivileges === true) {
+        enabledFlags.push(
+          `agents.list.${index}.sandbox.docker.dangerouslyDisableNoNewPrivileges=true`,
+        );
+      }
       collectSandboxDockerDangerousFlags(
         isRecord(agent?.sandbox?.docker) ? agent.sandbox.docker : undefined,
         `${getAgentDangerousFlagPathSegment(agent, index)}.sandbox.docker`,
