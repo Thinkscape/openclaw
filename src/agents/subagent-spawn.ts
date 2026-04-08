@@ -148,6 +148,8 @@ export type SpawnSubagentContext = {
   workspaceDir?: string;
 };
 
+const MAX_TIMER_SAFE_TIMEOUT_MS = 2_147_000_000;
+
 export type SpawnSubagentResult = {
   status: "accepted" | "forbidden" | "error";
   childSessionKey?: string;
@@ -469,6 +471,7 @@ async function cleanupProvisionalSession(
   options?: {
     emitLifecycleHooks?: boolean;
     deleteTranscript?: boolean;
+    gatewayTimeoutMs?: number;
   },
 ): Promise<void> {
   try {
@@ -479,7 +482,7 @@ async function cleanupProvisionalSession(
         emitLifecycleHooks: options?.emitLifecycleHooks === true,
         deleteTranscript: options?.deleteTranscript === true,
       },
-      timeoutMs: SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
+      timeoutMs: options?.gatewayTimeoutMs ?? SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
     });
   } catch {
     // Best-effort cleanup only.
@@ -491,6 +494,7 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
   attachmentAbsDir?: string;
   emitLifecycleHooks?: boolean;
   deleteTranscript?: boolean;
+  gatewayTimeoutMs?: number;
 }): Promise<void> {
   if (params.attachmentAbsDir) {
     try {
@@ -502,7 +506,16 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
   await cleanupProvisionalSession(params.childSessionKey, {
     emitLifecycleHooks: params.emitLifecycleHooks,
     deleteTranscript: params.deleteTranscript,
+    gatewayTimeoutMs: params.gatewayTimeoutMs,
   });
+}
+
+export function resolveSubagentGatewayTimeoutMs(cfg: ReturnType<typeof loadConfig>): number | undefined {
+  const configured = cfg.agents?.defaults?.subagents?.gatewayTimeoutMs;
+  if (typeof configured !== "number" || !Number.isFinite(configured)) {
+    return undefined;
+  }
+  return Math.min(Math.max(1, Math.floor(configured)), MAX_TIMER_SAFE_TIMEOUT_MS);
 }
 
 function resolveSpawnMode(params: {
@@ -670,6 +683,7 @@ export async function spawnSubagentDirect(
     cfg,
     runTimeoutSeconds: params.runTimeoutSeconds,
   });
+  const subagentGatewayTimeoutMs = resolveSubagentGatewayTimeoutMs(cfg);
   let modelApplied = false;
   let threadBindingReady = false;
   let hasBoundThreadDeliveryOrigin = false;
@@ -869,7 +883,7 @@ export async function spawnSubagentDirect(
         await callSubagentGateway({
           method: "sessions.delete",
           params: { key: childSessionKey, emitLifecycleHooks: false },
-          timeoutMs: SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
+          timeoutMs: subagentGatewayTimeoutMs ?? SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
         });
       } catch {
         // Best-effort cleanup only.
@@ -902,7 +916,7 @@ export async function spawnSubagentDirect(
         await callSubagentGateway({
           method: "sessions.delete",
           params: { key: childSessionKey, emitLifecycleHooks: false },
-          timeoutMs: SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
+          timeoutMs: subagentGatewayTimeoutMs ?? SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
         });
       } catch {
         // Best-effort cleanup only.
@@ -956,6 +970,7 @@ export async function spawnSubagentDirect(
     await cleanupProvisionalSession(childSessionKey, {
       emitLifecycleHooks: threadBindingReady,
       deleteTranscript: true,
+      gatewayTimeoutMs: subagentGatewayTimeoutMs,
     });
     return {
       status: materializedAttachments.status,
@@ -1008,6 +1023,7 @@ export async function spawnSubagentDirect(
       attachmentAbsDir,
       emitLifecycleHooks: threadBindingReady,
       deleteTranscript: true,
+      gatewayTimeoutMs: subagentGatewayTimeoutMs,
     });
     return {
       status: "error",
@@ -1076,7 +1092,7 @@ export async function spawnSubagentDirect(
           : {}),
         ...publicSpawnedMetadata,
       },
-      timeoutMs: resolveSubagentAgentGatewayTimeoutMs(runTimeoutSeconds),
+      timeoutMs: subagentGatewayTimeoutMs ?? resolveSubagentAgentGatewayTimeoutMs(runTimeoutSeconds),
     });
     const runId = readGatewayRunId(response);
     if (runId) {
@@ -1131,7 +1147,7 @@ export async function spawnSubagentDirect(
           deleteTranscript: true,
           emitLifecycleHooks,
         },
-        timeoutMs: SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
+        timeoutMs: subagentGatewayTimeoutMs ?? SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
       });
     } catch {
       // Best-effort only.
@@ -1182,7 +1198,7 @@ export async function spawnSubagentDirect(
           deleteTranscript: true,
           emitLifecycleHooks: threadBindingReady,
         },
-        timeoutMs: SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
+        timeoutMs: subagentGatewayTimeoutMs ?? SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
       });
     } catch {
       // Best-effort cleanup only.
