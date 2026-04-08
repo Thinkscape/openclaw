@@ -34,6 +34,7 @@ describe("agent concurrency defaults", () => {
           subagents: {
             maxSpawnDepth: 2,
             maxChildrenPerAgent: 7,
+            gatewayTimeoutMs: 25_000,
           },
         },
       },
@@ -41,6 +42,7 @@ describe("agent concurrency defaults", () => {
 
     expect(parsed.agents?.defaults?.subagents?.maxSpawnDepth).toBe(2);
     expect(parsed.agents?.defaults?.subagents?.maxChildrenPerAgent).toBe(7);
+    expect(parsed.agents?.defaults?.subagents?.gatewayTimeoutMs).toBe(25_000);
   });
 
   it("injects missing agent defaults", () => {
