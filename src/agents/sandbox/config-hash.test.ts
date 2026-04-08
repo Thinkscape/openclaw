@@ -85,6 +85,24 @@ describe("computeSandboxConfigHash", () => {
     expect(left).toBe(right);
   });
 
+  it("changes when no-new-privileges override changes", () => {
+    const shared = {
+      workspaceAccess: "rw" as const,
+      workspaceDir: "/tmp/workspace",
+      agentWorkspaceDir: "/tmp/workspace",
+      mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
+    };
+    const left = computeSandboxConfigHash({
+      ...shared,
+      docker: createDockerConfig(),
+    });
+    const right = computeSandboxConfigHash({
+      ...shared,
+      docker: createDockerConfig({ dangerouslyDisableNoNewPrivileges: true }),
+    });
+    expect(left).not.toBe(right);
+  });
+
   it.each(ORDER_SENSITIVE_ARRAY_CASES)("treats $field order as significant", (testCase) => {
     const shared = {
       workspaceAccess: "rw" as const,

@@ -137,6 +137,21 @@ describe("buildSandboxCreateArgs", () => {
     );
   });
 
+  it("omits no-new-privileges when the dangerous override is enabled", () => {
+    const cfg = createSandboxConfig({
+      dangerouslyDisableNoNewPrivileges: true,
+    });
+
+    const args = buildSandboxCreateArgs({
+      name: "openclaw-sbx-no-new-privs",
+      cfg,
+      scopeKey: "main",
+      createdAtMs: 1700000000000,
+    });
+
+    expect(args).not.toEqual(expect.arrayContaining(["--security-opt", "no-new-privileges"]));
+  });
+
   it("preserves the OpenClaw exec marker when strict env sanitization is enabled", () => {
     const cfg = createSandboxConfig({
       env: {
