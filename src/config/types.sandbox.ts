@@ -59,6 +59,11 @@ export type SandboxDockerSettings = {
    * Default behavior blocks container namespace joins to preserve sandbox isolation.
    */
   dangerouslyAllowContainerNamespaceJoin?: boolean;
+  /**
+   * Dangerous override: disable Docker's no-new-privileges hardening.
+   * This permits setuid elevation such as sudo inside the sandbox.
+   */
+  dangerouslyDisableNoNewPrivileges?: boolean;
 };
 
 export type SandboxBrowserSettings = {
