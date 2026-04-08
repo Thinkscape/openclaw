@@ -34,6 +34,16 @@ export function collectEnabledInsecureOrDangerousFlags(cfg: OpenClawConfig): str
   if (cfg.tools?.exec?.applyPatch?.workspaceOnly === false) {
     enabledFlags.push("tools.exec.applyPatch.workspaceOnly=false");
   }
+  if (cfg.agents?.defaults?.sandbox?.docker?.dangerouslyDisableNoNewPrivileges === true) {
+    enabledFlags.push("agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges=true");
+  }
+  for (const entry of cfg.agents?.list ?? []) {
+    if (entry?.id && entry.sandbox?.docker?.dangerouslyDisableNoNewPrivileges === true) {
+      enabledFlags.push(
+        `agents.list.${entry.id}.sandbox.docker.dangerouslyDisableNoNewPrivileges=true`,
+      );
+    }
+  }
 
   const pluginEntries = cfg.plugins?.entries;
   if (!isRecord(pluginEntries)) {
