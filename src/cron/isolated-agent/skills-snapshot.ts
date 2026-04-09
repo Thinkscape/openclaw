@@ -1,15 +1,18 @@
-import { resolveAgentSkillsFilter } from "../../agents/agent-scope.js";
-import { buildWorkspaceSkillSnapshot, type SkillSnapshot } from "../../agents/skills.js";
+import { canExecRequestNode } from "../../agents/exec-defaults.js";
+import type { SkillSnapshot } from "../../agents/skills.js";
 import { matchesSkillFilter } from "../../agents/skills/filter.js";
-import { getSkillsSnapshotVersion } from "../../agents/skills/refresh.js";
 import type { OpenClawConfig } from "../../config/config.js";
-import { getRemoteSkillEligibility } from "../../infra/skills-remote.js";
+import {
+  buildWorkspaceSkillSnapshot,
+  getRemoteSkillEligibility,
+  getSkillsSnapshotVersion,
+  resolveAgentSkillsFilter,
+} from "./run.runtime.js";
 
 export function resolveCronSkillsSnapshot(params: {
   workspaceDir: string;
   config: OpenClawConfig;
   agentId: string;
-  sessionKey?: string;
   existingSnapshot?: SkillSnapshot;
   isFastTestEnv: boolean;
 }): SkillSnapshot {
@@ -31,9 +34,16 @@ export function resolveCronSkillsSnapshot(params: {
 
   return buildWorkspaceSkillSnapshot(params.workspaceDir, {
     config: params.config,
+    agentId: params.agentId,
     skillFilter,
-    eligibility: { remote: getRemoteSkillEligibility() },
-    sessionKey: params.sessionKey,
+    eligibility: {
+      remote: getRemoteSkillEligibility({
+        advertiseExecNode: canExecRequestNode({
+          cfg: params.config,
+          agentId: params.agentId,
+        }),
+      }),
+    },
     snapshotVersion,
   });
 }
