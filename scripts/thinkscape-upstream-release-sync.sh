@@ -345,7 +345,7 @@ main() {
   pnpm vitest run \
     src/config/zod-schema.session-maintenance-extensions.test.ts \
     src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts \
-    src/agents/session-write-lock.config-resolution.test.ts
+    src/agents/session-write-lock.test.ts
 
   if ! git diff --quiet || ! git diff --cached --quiet; then
     git add -A
