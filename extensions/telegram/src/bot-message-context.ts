@@ -1,15 +1,11 @@
 import type { ReactionTypeEmoji } from "@grammyjs/types";
-import { resolveAckReaction } from "openclaw/plugin-sdk/agent-runtime";
 import {
-  createStatusReactionController,
+  resolveAckReaction,
   shouldAckReaction as shouldAckReactionGate,
   type StatusReactionController,
 } from "openclaw/plugin-sdk/channel-feedback";
 import { logInboundDrop } from "openclaw/plugin-sdk/channel-inbound";
-import { recordChannelActivity } from "openclaw/plugin-sdk/channel-runtime";
-import { loadConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { TelegramDirectConfig, TelegramGroupConfig } from "openclaw/plugin-sdk/config-runtime";
-import { ensureConfiguredBindingRouteReady } from "openclaw/plugin-sdk/conversation-runtime";
 import { deriveLastRoutePolicy } from "openclaw/plugin-sdk/routing";
 import { DEFAULT_ACCOUNT_ID, resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
@@ -45,6 +41,15 @@ export type {
   TelegramMediaRef,
 } from "./bot-message-context.types.js";
 
+type TelegramMessageContextRuntime = typeof import("./bot-message-context.runtime.js");
+
+let telegramMessageContextRuntimePromise: Promise<TelegramMessageContextRuntime> | undefined;
+
+async function loadTelegramMessageContextRuntime() {
+  telegramMessageContextRuntimePromise ??= import("./bot-message-context.runtime.js");
+  return await telegramMessageContextRuntimePromise;
+}
+
 type TelegramMessageContextPayload = Awaited<ReturnType<typeof buildTelegramInboundContextPayload>>;
 type TelegramReactionApi = (
   chatId: BuildTelegramMessageContextParams["primaryCtx"]["message"]["chat"]["id"],
@@ -61,6 +66,9 @@ export type TelegramMessageContext = {
   groupConfig?: ReturnType<
     BuildTelegramMessageContextParams["resolveTelegramGroupConfig"]
   >["groupConfig"];
+  topicConfig?: ReturnType<
+    BuildTelegramMessageContextParams["resolveTelegramGroupConfig"]
+  >["topicConfig"];
   resolvedThreadId?: number;
   threadSpec: ReturnType<typeof resolveTelegramThreadSpec>;
   replyThreadId?: number;
@@ -99,6 +107,8 @@ export const buildTelegramMessageContext = async ({
   resolveGroupRequireMention,
   resolveTelegramGroupConfig,
   loadFreshConfig,
+  runtime,
+  sessionRuntime,
   upsertPairingRequest,
   sendChatActionHandler,
 }: BuildTelegramMessageContextParams): Promise<TelegramMessageContext | null> => {
@@ -138,7 +148,9 @@ export const buildTelegramMessageContext = async ({
       ? (groupConfig.dmPolicy ?? dmPolicy)
       : dmPolicy;
   // Fresh config for bindings lookup; other routing inputs are payload-derived.
-  const freshCfg = (loadFreshConfig ?? loadConfig)();
+  const freshCfg =
+    loadFreshConfig?.() ??
+    (runtime?.loadConfig ?? (await loadTelegramMessageContextRuntime()).loadConfig)();
   let { route, configuredBinding, configuredBindingSessionKey } = resolveTelegramConversationRoute({
     cfg: freshCfg,
     accountId: account.accountId,
@@ -261,6 +273,9 @@ export const buildTelegramMessageContext = async ({
     if (!configuredBinding) {
       return true;
     }
+    const ensureConfiguredBindingRouteReady =
+      runtime?.ensureConfiguredBindingRouteReady ??
+      (await loadTelegramMessageContextRuntime()).ensureConfiguredBindingRouteReady;
     const ensured = await ensureConfiguredBindingRouteReady({
       cfg: freshCfg,
       bindingResolution: configuredBinding,
@@ -319,6 +334,9 @@ export const buildTelegramMessageContext = async ({
     baseRequireMention,
   );
 
+  const recordChannelActivity =
+    runtime?.recordChannelActivity ??
+    (await loadTelegramMessageContextRuntime()).recordChannelActivity;
   recordChannelActivity({
     channel: "telegram",
     accountId: account.accountId,
@@ -332,10 +350,12 @@ export const buildTelegramMessageContext = async ({
     allMedia,
     isGroup,
     chatId,
+    accountId: account.accountId,
     senderId,
     senderUsername,
     resolvedThreadId,
     routeAgentId: route.agentId,
+    sessionKey,
     effectiveGroupAllow,
     effectiveDmAllow,
     groupConfig,
@@ -388,49 +408,51 @@ export const buildTelegramMessageContext = async ({
     resolvedStatusReactionEmojis,
   );
   let allowedStatusReactionEmojisPromise: Promise<Set<TelegramReactionEmoji> | null> | null = null;
-  const statusReactionController: StatusReactionController | null =
+  const createStatusReactionController =
     statusReactionsEnabled && msg.message_id
-      ? createStatusReactionController({
-          enabled: true,
-          adapter: {
-            setReaction: async (emoji: string) => {
-              if (reactionApi) {
-                if (!allowedStatusReactionEmojisPromise) {
-                  allowedStatusReactionEmojisPromise = resolveTelegramAllowedEmojiReactions({
-                    chat: msg.chat,
-                    chatId,
-                    getChat: getChatApi ?? undefined,
-                  }).catch((err) => {
-                    logVerbose(
-                      `telegram status-reaction available_reactions lookup failed for chat ${chatId}: ${String(err)}`,
-                    );
-                    return null;
-                  });
-                }
-                const allowedStatusReactionEmojis = await allowedStatusReactionEmojisPromise;
-                const resolvedEmoji = resolveTelegramReactionVariant({
-                  requestedEmoji: emoji,
-                  variantsByRequestedEmoji: statusReactionVariantsByEmoji,
-                  allowedEmojiReactions: allowedStatusReactionEmojis,
-                });
-                if (!resolvedEmoji) {
-                  return;
-                }
-                await reactionApi(chatId, msg.message_id, [
-                  { type: "emoji", emoji: resolvedEmoji },
-                ]);
-              }
-            },
-            // Telegram replaces atomically — no removeReaction needed
-          },
-          initialEmoji: ackReaction,
-          emojis: resolvedStatusReactionEmojis,
-          timing: statusReactionsConfig?.timing,
-          onError: (err) => {
-            logVerbose(`telegram status-reaction error for chat ${chatId}: ${String(err)}`);
-          },
-        })
+      ? (runtime?.createStatusReactionController ??
+        (await loadTelegramMessageContextRuntime()).createStatusReactionController)
       : null;
+  const statusReactionController: StatusReactionController | null = createStatusReactionController
+    ? createStatusReactionController({
+        enabled: true,
+        adapter: {
+          setReaction: async (emoji: string) => {
+            if (reactionApi) {
+              if (!allowedStatusReactionEmojisPromise) {
+                allowedStatusReactionEmojisPromise = resolveTelegramAllowedEmojiReactions({
+                  chat: msg.chat,
+                  chatId,
+                  getChat: getChatApi ?? undefined,
+                }).catch((err) => {
+                  logVerbose(
+                    `telegram status-reaction available_reactions lookup failed for chat ${chatId}: ${String(err)}`,
+                  );
+                  return null;
+                });
+              }
+              const allowedStatusReactionEmojis = await allowedStatusReactionEmojisPromise;
+              const resolvedEmoji = resolveTelegramReactionVariant({
+                requestedEmoji: emoji,
+                variantsByRequestedEmoji: statusReactionVariantsByEmoji,
+                allowedEmojiReactions: allowedStatusReactionEmojis,
+              });
+              if (!resolvedEmoji) {
+                return;
+              }
+              await reactionApi(chatId, msg.message_id, [{ type: "emoji", emoji: resolvedEmoji }]);
+            }
+          },
+          // Telegram replaces atomically — no removeReaction needed
+        },
+        initialEmoji: ackReaction,
+        emojis: resolvedStatusReactionEmojis,
+        timing: statusReactionsConfig?.timing,
+        onError: (err) => {
+          logVerbose(`telegram status-reaction error for chat ${chatId}: ${String(err)}`);
+        },
+      })
+    : null;
 
   // When status reactions are enabled, setQueued() replaces the simple ack reaction
   const ackReactionPromise: Promise<boolean> | null = statusReactionController
@@ -481,7 +503,9 @@ export const buildTelegramMessageContext = async ({
     locationData: bodyResult.locationData,
     options,
     dmAllowFrom,
+    effectiveGroupAllow,
     commandAuthorized: bodyResult.commandAuthorized,
+    sessionRuntime,
   });
 
   return {
@@ -491,6 +515,7 @@ export const buildTelegramMessageContext = async ({
     chatId,
     isGroup,
     groupConfig,
+    topicConfig,
     resolvedThreadId,
     threadSpec,
     replyThreadId,

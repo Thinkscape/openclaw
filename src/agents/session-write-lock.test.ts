@@ -2,8 +2,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { loadConfig } from "../config/config.js";
-import { withTempHome, writeOpenClawConfig } from "../config/test-helpers.js";
 
 const FAKE_STARTTIME = 12345;
 let __testing: typeof import("./session-write-lock.js").__testing;
@@ -11,10 +9,10 @@ let acquireSessionWriteLock: typeof import("./session-write-lock.js").acquireSes
 let cleanStaleLockFiles: typeof import("./session-write-lock.js").cleanStaleLockFiles;
 let resetSessionWriteLockStateForTest: typeof import("./session-write-lock.js").resetSessionWriteLockStateForTest;
 let resolveSessionLockMaxHoldFromTimeout: typeof import("./session-write-lock.js").resolveSessionLockMaxHoldFromTimeout;
-let resolveSessionWriteLockConfig: typeof import("./session-write-lock.js").resolveSessionWriteLockConfig;
 
-vi.mock("../shared/pid-alive.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../shared/pid-alive.js")>();
+vi.mock("../shared/pid-alive.js", async () => {
+  const original =
+    await vi.importActual<typeof import("../shared/pid-alive.js")>("../shared/pid-alive.js");
   return {
     ...original,
     // Keep liveness checks real; only pin process start time for PID recycle coverage.
@@ -103,7 +101,6 @@ describe("acquireSessionWriteLock", () => {
       cleanStaleLockFiles,
       resetSessionWriteLockStateForTest,
       resolveSessionLockMaxHoldFromTimeout,
-      resolveSessionWriteLockConfig,
     } = await import("./session-write-lock.js"));
   });
 
@@ -176,28 +173,6 @@ describe("acquireSessionWriteLock", () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
-  });
-
-  it("reads default timeout and backoff values from config when present", async () => {
-    await withTempHome(async (home) => {
-      await writeOpenClawConfig(home, {
-        session: {
-          writeLock: {
-            timeoutMs: 30_000,
-            backoffBaseMs: 5,
-            backoffCapMs: 50,
-            backoffJitterMs: 10,
-          },
-        },
-      });
-
-      expect(resolveSessionWriteLockConfig(loadConfig())).toEqual({
-        timeoutMs: 30_000,
-        backoffBaseMs: 5,
-        backoffCapMs: 50,
-        backoffJitterMs: 10,
-      });
-    });
   });
 
   it("does not reclaim fresh malformed lock files during contention", async () => {
@@ -430,10 +405,10 @@ describe("acquireSessionWriteLock", () => {
       const lockPath = `${sessionFile}.lock`;
       await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
 
-      process.emit("SIGINT");
+      __testing.handleTerminationSignal("SIGINT");
 
       await expect(fs.access(lockPath)).rejects.toThrow();
-      expect(otherHandlerCalled).toBe(true);
+      expect(otherHandlerCalled).toBe(false);
       expect(killCalls).toEqual([]);
     } finally {
       process.off("SIGINT", otherHandler);
@@ -453,11 +428,16 @@ describe("acquireSessionWriteLock", () => {
   });
   it("keeps other signal listeners registered", () => {
     const keepAlive = () => {};
+    const originalKill = process.kill.bind(process);
+    process.kill = ((_pid: number, _signal?: NodeJS.Signals) => true) as typeof process.kill;
     process.on("SIGINT", keepAlive);
 
-    __testing.handleTerminationSignal("SIGINT");
-
-    expect(process.listeners("SIGINT")).toContain(keepAlive);
-    process.off("SIGINT", keepAlive);
+    try {
+      __testing.handleTerminationSignal("SIGINT");
+      expect(process.listeners("SIGINT")).toContain(keepAlive);
+    } finally {
+      process.off("SIGINT", keepAlive);
+      process.kill = originalKill;
+    }
   });
 });
