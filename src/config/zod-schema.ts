@@ -955,6 +955,17 @@ export const OpenClawSchema = z
         allowBundled: z.array(z.string()).optional(),
         load: z
           .object({
+            promptPathAliases: z
+              .array(
+                z
+                  .object({
+                    from: z.string(),
+                    to: z.string(),
+                    when: z.union([z.literal("always"), z.literal("sandbox")]).optional(),
+                  })
+                  .strict(),
+              )
+              .optional(),
             extraDirs: z.array(z.string()).optional(),
             watch: z.boolean().optional(),
             watchDebounceMs: z.number().int().min(0).optional(),

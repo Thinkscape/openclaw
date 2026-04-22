@@ -15,6 +15,7 @@ export async function resolveCronSkillsSnapshot(params: {
   workspaceDir: string;
   config: OpenClawConfig;
   agentId: string;
+  sessionKey?: string;
   existingSnapshot?: SkillSnapshot;
   isFastTestEnv: boolean;
 }): Promise<SkillSnapshot> {
@@ -48,5 +49,6 @@ export async function resolveCronSkillsSnapshot(params: {
       }),
     },
     snapshotVersion,
+    sessionKey: params.sessionKey,
   });
 }
