@@ -628,6 +628,7 @@ async function agentCommandInternal(
               }),
             },
             snapshotVersion: skillsSnapshotVersion,
+            sessionKey,
             skillFilter,
             agentId: sessionAgentId,
           });
