@@ -151,6 +151,15 @@ export const SessionSchema = z
         }
       })
       .optional(),
+    writeLock: z
+      .object({
+        timeoutMs: z.number().int().positive().optional(),
+        backoffBaseMs: z.number().int().positive().optional(),
+        backoffCapMs: z.number().int().positive().optional(),
+        backoffJitterMs: z.number().int().min(0).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .optional();
