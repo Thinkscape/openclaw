@@ -186,6 +186,19 @@ export type SessionConfig = {
   threadBindings?: SessionThreadBindingsConfig;
   /** Automatic session store maintenance (pruning, capping, file rotation). */
   maintenance?: SessionMaintenanceConfig;
+  /** Tuning for the session file write-lock retry behaviour (backoff, timeout, jitter). */
+  writeLock?: SessionWriteLockConfig;
+};
+
+export type SessionWriteLockConfig = {
+  /** Maximum time in milliseconds to wait for the lock to become available. Default: 10000. */
+  timeoutMs?: number;
+  /** Base backoff delay in milliseconds between retry attempts. Default: 50. */
+  backoffBaseMs?: number;
+  /** Maximum backoff delay cap in milliseconds. Default: 1000. */
+  backoffCapMs?: number;
+  /** Extra jitter in milliseconds added to each retry delay. Default: 0. */
+  backoffJitterMs?: number;
 };
 
 export type SessionMaintenanceMode = "enforce" | "warn";
