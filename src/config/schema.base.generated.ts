@@ -5181,6 +5181,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     minimum: 0,
                     maximum: 9007199254740991,
                   },
+                  gatewayTimeoutMs: {
+                    description:
+                      "Internal gateway timeout in milliseconds for sub-agent spawn self-calls such as sessions.patch, agent, and sessions.delete (default: 10000). Increase on slower gateways or remote filesystems that delay child acceptance.",
+                    type: "integer",
+                    exclusiveMinimum: 0,
+                    maximum: 9007199254740991,
+                  },
                   announceTimeoutMs: {
                     type: "integer",
                     exclusiveMinimum: 0,
@@ -5401,6 +5408,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         title: "Sandbox Docker Allow Container Namespace Join",
                         description:
                           "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
+                      },
+                      dangerouslyDisableNoNewPrivileges: {
+                        type: "boolean",
+                        title: "Sandbox Docker Disable No New Privileges",
+                        description:
+                          "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
                       },
                     },
                     additionalProperties: false,
@@ -6735,6 +6748,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                           title: "Agent Sandbox Docker Allow Container Namespace Join",
                           description:
                             "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
+                        },
+                        dangerouslyDisableNoNewPrivileges: {
+                          type: "boolean",
+                          title: "Agent Sandbox Docker Disable No New Privileges",
+                          description:
+                            "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
                         },
                       },
                       additionalProperties: false,
@@ -19671,32 +19690,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
             description:
               "Shared defaults for thread-bound session routing behavior across providers that support thread focus workflows. Configure global defaults here and override per channel only when behavior differs.",
           },
-          writeLock: {
-            type: "object",
-            properties: {
-              timeoutMs: {
-                type: "integer",
-                exclusiveMinimum: 0,
-                maximum: 9007199254740991,
-              },
-              backoffBaseMs: {
-                type: "integer",
-                exclusiveMinimum: 0,
-                maximum: 9007199254740991,
-              },
-              backoffCapMs: {
-                type: "integer",
-                exclusiveMinimum: 0,
-                maximum: 9007199254740991,
-              },
-              backoffJitterMs: {
-                type: "integer",
-                minimum: 0,
-                maximum: 9007199254740991,
-              },
-            },
-            additionalProperties: false,
-          },
           maintenance: {
             type: "object",
             properties: {
@@ -19797,6 +19790,47 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
             title: "Session Maintenance",
             description:
               "Automatic session-store maintenance controls for pruning age, entry caps, and file rotation behavior. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
+          },
+          writeLock: {
+            type: "object",
+            properties: {
+              timeoutMs: {
+                type: "integer",
+                exclusiveMinimum: 0,
+                maximum: 9007199254740991,
+                title: "Write Lock Timeout (ms)",
+                description:
+                  "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
+              },
+              backoffBaseMs: {
+                type: "integer",
+                exclusiveMinimum: 0,
+                maximum: 9007199254740991,
+                title: "Write Lock Backoff Base (ms)",
+                description:
+                  "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
+              },
+              backoffCapMs: {
+                type: "integer",
+                exclusiveMinimum: 0,
+                maximum: 9007199254740991,
+                title: "Write Lock Backoff Cap (ms)",
+                description:
+                  "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
+              },
+              backoffJitterMs: {
+                type: "integer",
+                minimum: 0,
+                maximum: 9007199254740991,
+                title: "Write Lock Backoff Jitter (ms)",
+                description:
+                  "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
+              },
+            },
+            additionalProperties: false,
+            title: "Session Write Lock Tuning",
+            description:
+              "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
           },
         },
         additionalProperties: false,
@@ -22427,6 +22461,46 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
           load: {
             type: "object",
             properties: {
+              promptPathAliases: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    from: {
+                      type: "string",
+                      title: "Skill Prompt Alias Source Prefix",
+                      description:
+                        "Canonical source path prefix to match against discovered SKILL.md locations before rendering the skills prompt. This should point at the host or gateway-visible directory returned by skill discovery, for example `/home/node/.openclaw/shared/skills`.",
+                    },
+                    to: {
+                      type: "string",
+                      title: "Skill Prompt Alias Target Prefix",
+                      description:
+                        "Replacement path prefix shown to the agent in the skills prompt when a matching source path is found. Point this at the runtime-visible location the read tool can actually open, for example `/shared/skills` inside a sandbox.",
+                    },
+                    when: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          const: "always",
+                        },
+                        {
+                          type: "string",
+                          const: "sandbox",
+                        },
+                      ],
+                      title: "Skill Prompt Alias Scope",
+                      description:
+                        'Controls when the alias applies: `"always"` rewrites prompt locations in every run, while `"sandbox"` only rewrites them for sandboxed sessions.',
+                    },
+                  },
+                  required: ["from", "to"],
+                  additionalProperties: false,
+                },
+                title: "Skill Prompt Path Aliases",
+                description:
+                  "Optional prompt-facing path alias rules for skill locations. Use these when skills are discovered from a host or gateway path but must be read through a different runtime-visible path such as a sandbox bind mount.",
+              },
               extraDirs: {
                 type: "array",
                 items: {
@@ -24917,6 +24991,26 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Per-source broadcast destination list where each key is a source peer ID and the value is an array of destination peer IDs. Keep lists intentional to avoid accidental message amplification.",
       tags: ["advanced"],
     },
+    "skills.load.promptPathAliases": {
+      label: "Skill Prompt Path Aliases",
+      help: "Optional prompt-facing path alias rules for skill locations. Use these when skills are discovered from a host or gateway path but must be read through a different runtime-visible path such as a sandbox bind mount.",
+      tags: ["storage"],
+    },
+    "skills.load.promptPathAliases[].from": {
+      label: "Skill Prompt Alias Source Prefix",
+      help: "Canonical source path prefix to match against discovered SKILL.md locations before rendering the skills prompt. This should point at the host or gateway-visible directory returned by skill discovery, for example `/home/node/.openclaw/shared/skills`.",
+      tags: ["storage"],
+    },
+    "skills.load.promptPathAliases[].to": {
+      label: "Skill Prompt Alias Target Prefix",
+      help: "Replacement path prefix shown to the agent in the skills prompt when a matching source path is found. Point this at the runtime-visible location the read tool can actually open, for example `/shared/skills` inside a sandbox.",
+      tags: ["storage"],
+    },
+    "skills.load.promptPathAliases[].when": {
+      label: "Skill Prompt Alias Scope",
+      help: 'Controls when the alias applies: `"always"` rewrites prompt locations in every run, while `"sandbox"` only rewrites them for sandboxed sessions.',
+      tags: ["storage"],
+    },
     "skills.load.watch": {
       label: "Watch Skills",
       help: "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
@@ -26102,6 +26196,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
       tags: ["security", "access", "storage", "advanced"],
     },
+    "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges": {
+      label: "Sandbox Docker Disable No New Privileges",
+      help: "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
+      tags: ["security", "storage", "advanced"],
+    },
     "commands.native": {
       label: "Native Commands",
       help: "Registers native slash/menu commands with channels that support command registration (Discord, Slack, Telegram). Keep enabled for discoverability unless you intentionally run text-only command workflows.",
@@ -26434,27 +26533,27 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       tags: ["performance", "storage"],
     },
     "session.writeLock": {
-      label: "Session Write Lock",
+      label: "Session Write Lock Tuning",
       help: "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
       tags: ["storage"],
     },
     "session.writeLock.timeoutMs": {
-      label: "Session Write Lock Timeout (ms)",
+      label: "Write Lock Timeout (ms)",
       help: "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
       tags: ["performance", "storage"],
     },
     "session.writeLock.backoffBaseMs": {
-      label: "Session Write Lock Backoff Base (ms)",
+      label: "Write Lock Backoff Base (ms)",
       help: "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
       tags: ["reliability", "storage"],
     },
     "session.writeLock.backoffCapMs": {
-      label: "Session Write Lock Backoff Cap (ms)",
+      label: "Write Lock Backoff Cap (ms)",
       help: "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
       tags: ["reliability", "storage"],
     },
     "session.writeLock.backoffJitterMs": {
-      label: "Session Write Lock Backoff Jitter (ms)",
+      label: "Write Lock Backoff Jitter (ms)",
       help: "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
       tags: ["reliability", "storage"],
     },
@@ -27199,6 +27298,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "Agent Sandbox Docker Allow Container Namespace Join",
       help: "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
       tags: ["security", "access", "storage", "advanced"],
+    },
+    "agents.list[].sandbox.docker.dangerouslyDisableNoNewPrivileges": {
+      label: "Agent Sandbox Docker Disable No New Privileges",
+      help: "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
+      tags: ["security", "storage", "advanced"],
     },
     "discovery.mdns.mode": {
       label: "mDNS Discovery Mode",
