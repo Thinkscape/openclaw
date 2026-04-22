@@ -48,43 +48,51 @@ ALL_TAG_NAMES.sort((a, b) => b.length - a.length);
 
 const TAG_NAME_PATTERN = ALL_TAG_NAMES.join("|");
 
+const LEFT_BRACKET = "(?:[<＜<]|&lt;)";
+const RIGHT_BRACKET = "(?:[>＞>]|&gt;)";
 /** Match self-closing media-tag syntax with file/src/path/url attributes. */
-const SELF_CLOSING_TAG_REGEX = new RegExp(
+export const SELF_CLOSING_TAG_REGEX = new RegExp(
   "`?" +
-    "[<＜<]\\s*(" +
+    LEFT_BRACKET +
+    "\\s*(" +
     TAG_NAME_PATTERN +
     ")" +
-    "(?:\\s+(?!file|src|path|url)[a-z_-]+\\s*=\\s*[\"']?[^\"'/>＞>]*?[\"']?)*" +
+    "(?:\\s+(?!file|src|path|url)[a-z_-]+\\s*=\\s*[\"']?[^\"'\\s＜<>＞>]*?[\"']?)*" +
     "\\s+(?:file|src|path|url)\\s*=\\s*" +
     "[\"']?" +
-    "([^\"'/>＞>]+?)" +
+    "([^\"'\\s>＞]+?)" +
     "[\"']?" +
-    "(?:\\s+[a-z_-]+\\s*=\\s*[\"']?[^\"'/>＞>]*?[\"']?)*" +
+    "(?:\\s+[a-z_-]+\\s*=\\s*[\"']?[^\"'\\s＜<>＞>]*?[\"']?)*" +
     "\\s*/?" +
-    "\\s*[>＞>]" +
+    "\\s*" +
+    RIGHT_BRACKET +
     "`?",
   "gi",
 );
 
 /** Match malformed wrapped media tags that should be normalized. */
-const FUZZY_MEDIA_TAG_REGEX = new RegExp(
+export const FUZZY_MEDIA_TAG_REGEX = new RegExp(
   "`?" +
-    "[<＜<]\\s*(" +
+    LEFT_BRACKET +
+    "\\s*(" +
     TAG_NAME_PATTERN +
-    ")\\s*[>＞>]" +
+    ")\\s*" +
+    RIGHT_BRACKET +
     "[\"']?\\s*" +
     "([^<＜<＞>\"'`]+?)" +
     "\\s*[\"']?" +
-    "[<＜<]\\s*/?\\s*(?:" +
+    LEFT_BRACKET +
+    "\\s*/?\\s*(?:" +
     TAG_NAME_PATTERN +
-    ")\\s*[>＞>]" +
+    ")\\s*" +
+    RIGHT_BRACKET +
     "`?",
   "gi",
 );
 
 /** Normalize a raw tag name into the canonical tag set. */
 function resolveTagName(raw: string): (typeof VALID_TAGS)[number] {
-  const lower = raw.toLowerCase();
+  const lower = raw.trim().toLowerCase();
   if ((VALID_TAGS as readonly string[]).includes(lower)) {
     return lower as (typeof VALID_TAGS)[number];
   }
@@ -93,25 +101,37 @@ function resolveTagName(raw: string): (typeof VALID_TAGS)[number] {
 
 /** Match wrapped tags whose bodies need newline and tab cleanup. */
 const MULTILINE_TAG_CLEANUP = new RegExp(
-  "([<＜<]\\s*(?:" +
+  "(" +
+    LEFT_BRACKET +
+    "\\s*(?:" +
     TAG_NAME_PATTERN +
-    ")\\s*[>＞>])" +
+    ")\\s*" +
+    RIGHT_BRACKET +
+    ")" +
     "([\\s\\S]*?)" +
-    "([<＜<]\\s*/?\\s*(?:" +
+    "(" +
+    LEFT_BRACKET +
+    "\\s*/?\\s*(?:" +
     TAG_NAME_PATTERN +
-    ")\\s*[>＞>])",
+    ")\\s*" +
+    RIGHT_BRACKET +
+    ")",
   "gi",
 );
 
 /** Normalize malformed media-tag output into canonical wrapped tags. */
 export function normalizeMediaTags(text: string): string {
-  let cleaned = text.replace(SELF_CLOSING_TAG_REGEX, (_match, rawTag: string, content: string) => {
+  const normalizeWrappedTag = (_match: string, rawTag: string, content: string): string => {
     const tag = resolveTagName(rawTag);
     const trimmed = content.trim();
-    if (!trimmed) return _match;
+    if (!trimmed) {
+      return _match;
+    }
     const expanded = expandTilde(trimmed);
     return `<${tag}>${expanded}</${tag}>`;
-  });
+  };
+
+  let cleaned = text.replace(SELF_CLOSING_TAG_REGEX, normalizeWrappedTag);
 
   cleaned = cleaned.replace(
     MULTILINE_TAG_CLEANUP,
@@ -121,11 +141,5 @@ export function normalizeMediaTags(text: string): string {
     },
   );
 
-  return cleaned.replace(FUZZY_MEDIA_TAG_REGEX, (_match, rawTag: string, content: string) => {
-    const tag = resolveTagName(rawTag);
-    const trimmed = content.trim();
-    if (!trimmed) return _match;
-    const expanded = expandTilde(trimmed);
-    return `<${tag}>${expanded}</${tag}>`;
-  });
+  return cleaned.replace(FUZZY_MEDIA_TAG_REGEX, normalizeWrappedTag);
 }

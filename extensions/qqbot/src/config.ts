@@ -11,6 +11,15 @@ export const DEFAULT_ACCOUNT_ID = "default";
 
 interface QQBotChannelConfig extends QQBotAccountConfig {
   accounts?: Record<string, QQBotAccountConfig>;
+  defaultAccount?: string;
+}
+
+function normalizeConfiguredDefaultAccountId(raw: unknown): string | null {
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const normalized = raw.trim().toLowerCase();
+  return normalized || null;
 }
 
 function normalizeQQBotAccountConfig(account: QQBotAccountConfig | undefined): QQBotAccountConfig {
@@ -24,8 +33,30 @@ function normalizeQQBotAccountConfig(account: QQBotAccountConfig | undefined): Q
 }
 
 function normalizeAppId(raw: unknown): string {
-  if (raw === null || raw === undefined) return "";
-  return String(raw).trim();
+  if (typeof raw === "string") {
+    return raw.trim();
+  }
+  if (typeof raw === "number") {
+    return String(raw);
+  }
+  return "";
+}
+
+function buildQQBotAccountConfigPatch(input: {
+  appId?: string;
+  clientSecret?: string;
+  clientSecretFile?: string;
+  name?: string;
+}): Partial<QQBotAccountConfig> {
+  return {
+    ...(input.appId ? { appId: input.appId } : {}),
+    ...(input.clientSecret
+      ? { clientSecret: input.clientSecret, clientSecretFile: undefined }
+      : input.clientSecretFile
+        ? { clientSecretFile: input.clientSecretFile, clientSecret: undefined }
+        : {}),
+    ...(input.name ? { name: input.name } : {}),
+  };
 }
 
 /** List all configured QQBot account IDs. */
@@ -51,6 +82,14 @@ export function listQQBotAccountIds(cfg: OpenClawConfig): string[] {
 /** Resolve the default QQBot account ID. */
 export function resolveDefaultQQBotAccountId(cfg: OpenClawConfig): string {
   const qqbot = cfg.channels?.qqbot as QQBotChannelConfig | undefined;
+  const configuredDefaultAccountId = normalizeConfiguredDefaultAccountId(qqbot?.defaultAccount);
+  if (
+    configuredDefaultAccountId &&
+    (configuredDefaultAccountId === DEFAULT_ACCOUNT_ID ||
+      Boolean(qqbot?.accounts?.[configuredDefaultAccountId]?.appId))
+  ) {
+    return configuredDefaultAccountId;
+  }
   if (qqbot?.appId || process.env.QQBOT_APP_ID) {
     return DEFAULT_ACCOUNT_ID;
   }
@@ -69,7 +108,7 @@ export function resolveQQBotAccount(
   accountId?: string | null,
   opts?: { allowUnresolvedSecretRef?: boolean },
 ): ResolvedQQBotAccount {
-  const resolvedAccountId = accountId ?? DEFAULT_ACCOUNT_ID;
+  const resolvedAccountId = accountId ?? resolveDefaultQQBotAccountId(cfg);
   const qqbot = cfg.channels?.qqbot as QQBotChannelConfig | undefined;
 
   let accountConfig: QQBotAccountConfig = {};
@@ -144,6 +183,7 @@ export function applyQQBotAccountConfig(
   },
 ): OpenClawConfig {
   const next = { ...cfg };
+  const accountConfigPatch = buildQQBotAccountConfigPatch(input);
 
   if (accountId === DEFAULT_ACCOUNT_ID) {
     // Default allowFrom to ["*"] when not yet configured.
@@ -153,16 +193,10 @@ export function applyQQBotAccountConfig(
     next.channels = {
       ...next.channels,
       qqbot: {
-        ...((next.channels?.qqbot as Record<string, unknown>) || {}),
+        ...(next.channels?.qqbot as Record<string, unknown> | undefined),
         enabled: true,
         allowFrom,
-        ...(input.appId ? { appId: input.appId } : {}),
-        ...(input.clientSecret
-          ? { clientSecret: input.clientSecret, clientSecretFile: undefined }
-          : input.clientSecretFile
-            ? { clientSecretFile: input.clientSecretFile, clientSecret: undefined }
-            : {}),
-        ...(input.name ? { name: input.name } : {}),
+        ...accountConfigPatch,
       },
     };
   } else {
@@ -174,21 +208,15 @@ export function applyQQBotAccountConfig(
     next.channels = {
       ...next.channels,
       qqbot: {
-        ...((next.channels?.qqbot as Record<string, unknown>) || {}),
+        ...(next.channels?.qqbot as Record<string, unknown> | undefined),
         enabled: true,
         accounts: {
-          ...((next.channels?.qqbot as QQBotChannelConfig)?.accounts || {}),
+          ...(next.channels?.qqbot as QQBotChannelConfig)?.accounts,
           [accountId]: {
-            ...((next.channels?.qqbot as QQBotChannelConfig)?.accounts?.[accountId] || {}),
+            ...(next.channels?.qqbot as QQBotChannelConfig)?.accounts?.[accountId],
             enabled: true,
             allowFrom,
-            ...(input.appId ? { appId: input.appId } : {}),
-            ...(input.clientSecret
-              ? { clientSecret: input.clientSecret, clientSecretFile: undefined }
-              : input.clientSecretFile
-                ? { clientSecretFile: input.clientSecretFile, clientSecret: undefined }
-                : {}),
-            ...(input.name ? { name: input.name } : {}),
+            ...accountConfigPatch,
           },
         },
       },

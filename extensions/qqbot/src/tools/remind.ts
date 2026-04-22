@@ -1,4 +1,6 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
+import { jsonToolResult as json } from "./result.js";
 
 interface RemindParams {
   action: "add" | "list" | "remove";
@@ -55,15 +57,8 @@ const RemindSchema = {
   required: ["action"],
 } as const;
 
-function json(data: unknown) {
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
-    details: data,
-  };
-}
-
 function parseRelativeTime(timeStr: string): number | null {
-  const s = timeStr.trim().toLowerCase();
+  const s = normalizeLowercaseStringOrEmpty(timeStr);
   if (/^\d+$/.test(s)) {
     return parseInt(s, 10) * 60_000;
   }
@@ -96,7 +91,9 @@ function parseRelativeTime(timeStr: string): number | null {
 
 function isCronExpression(timeStr: string): boolean {
   const parts = timeStr.trim().split(/\s+/);
-  if (parts.length < 3 || parts.length > 6) return false;
+  if (parts.length < 3 || parts.length > 6) {
+    return false;
+  }
   // Each cron field must start with a digit, *, or a cron-special character.
   return parts.every((p) => /^[0-9*?/,LW#-]/.test(p));
 }
@@ -165,12 +162,18 @@ function buildCronJob(params: RemindParams) {
 
 function formatDelay(ms: number): string {
   const totalSeconds = Math.round(ms / 1000);
-  if (totalSeconds < 60) return `${totalSeconds}s`;
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
   const totalMinutes = Math.round(ms / 60_000);
-  if (totalMinutes < 60) return `${totalMinutes}m`;
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
+  }
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  if (minutes === 0) return `${hours}h`;
+  if (minutes === 0) {
+    return `${hours}h`;
+  }
   return `${hours}h${minutes}m`;
 }
 
