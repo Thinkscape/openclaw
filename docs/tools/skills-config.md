@@ -17,6 +17,13 @@ Most skills loader/install configuration lives under `skills` in
   skills: {
     allowBundled: ["gemini", "peekaboo"],
     load: {
+      promptPathAliases: [
+        {
+          from: "/home/node/.openclaw/shared/skills",
+          to: "/shared/skills",
+          when: "sandbox",
+        },
+      ],
       extraDirs: ["~/Projects/agent-scripts/skills", "~/Projects/oss/some-skill-pack/skills"],
       watch: true,
       watchDebounceMs: 250,
@@ -88,6 +95,16 @@ Rules:
   `<workspace>/.agents/skills`, and `<workspace>/skills`.
 - `allowBundled`: optional allowlist for **bundled** skills only. When set, only
   bundled skills in the list are eligible (managed, agent, and workspace skills unaffected).
+- `load.promptPathAliases`: optional prompt-facing path rewrites for discovered
+  skill locations. Use this when a skill is loaded from a host/gateway path but
+  must be read through a different runtime-visible path, such as `/shared/skills`
+  inside a sandbox.
+- `load.promptPathAliases[].from`: source path prefix to match against the canonical
+  discovered `SKILL.md` path.
+- `load.promptPathAliases[].to`: replacement path prefix shown to the agent in
+  the skills prompt.
+- `load.promptPathAliases[].when`: apply the alias in all runs or only sandboxed
+  runs (`always` or `sandbox`, default: `always`).
 - `load.extraDirs`: additional skill directories to scan (lowest precedence).
 - `load.watch`: watch skill folders and refresh the skills snapshot (default: true).
 - `load.watchDebounceMs`: debounce for skill watcher events in milliseconds (default: 250).
@@ -119,6 +136,31 @@ Per-skill fields:
   `~/.agents/skills` → `~/.openclaw/skills` → bundled skills →
   `skills.load.extraDirs`.
 - Changes to skills are picked up on the next agent turn when the watcher is enabled.
+
+### Shared skills mounted into sandboxes
+
+If you load shared skills from a gateway-local path but expose them inside the
+sandbox through a bind mount, configure both:
+
+```json5
+{
+  skills: {
+    load: {
+      extraDirs: ["/home/node/.openclaw/shared/skills"],
+      promptPathAliases: [
+        {
+          from: "/home/node/.openclaw/shared/skills",
+          to: "/shared/skills",
+          when: "sandbox",
+        },
+      ],
+    },
+  },
+}
+```
+
+This keeps skill discovery on the gateway path while advertising a
+readable-in-sandbox `<location>` path to the agent.
 
 ### Sandboxed skills + env vars
 
