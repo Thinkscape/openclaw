@@ -1,126 +1,34 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
-import {
-  applyAccountNameToChannelSection,
-  deleteAccountFromConfigSection,
-  setAccountEnabledInConfigSection,
-} from "openclaw/plugin-sdk/core";
-import { hasConfiguredSecretInput } from "openclaw/plugin-sdk/secret-input";
 import { initApiConfig } from "./api.js";
-import { applyQQBotSetupAccountConfig, validateQQBotSetupInput } from "./channel.setup.js";
-import { qqbotChannelConfigSchema } from "./config-schema.js";
-import {
-  DEFAULT_ACCOUNT_ID,
-  listQQBotAccountIds,
-  resolveQQBotAccount,
-  resolveDefaultQQBotAccountId,
-} from "./config.js";
+import { qqbotBasePluginFields } from "./channel-base.js";
+import { DEFAULT_ACCOUNT_ID, resolveQQBotAccount } from "./config.js";
 import { getQQBotRuntime } from "./runtime.js";
-import { qqbotSetupWizard } from "./setup-surface.js";
 // Re-export text helpers so existing consumers of channel.ts are unaffected.
 // The canonical definition lives in text-utils.ts to avoid a circular
 // dependency: channel.ts → (dynamic) gateway.ts → outbound-deliver.ts → channel.ts.
 export { chunkText, TEXT_CHUNK_LIMIT } from "./text-utils.js";
 import type { ResolvedQQBotAccount } from "./types.js";
 
+type QQBotOutboundModule = typeof import("./outbound.js");
+
 // Shared promise so concurrent multi-account startups serialize the dynamic
 // import of the gateway module, avoiding an ESM circular-dependency race.
 let _gatewayModulePromise: Promise<typeof import("./gateway.js")> | undefined;
+let _outboundModulePromise: Promise<QQBotOutboundModule> | undefined;
+
 function loadGatewayModule(): Promise<typeof import("./gateway.js")> {
   _gatewayModulePromise ??= import("./gateway.js");
   return _gatewayModulePromise;
 }
 
-export const qqbotPlugin: ChannelPlugin<ResolvedQQBotAccount> = {
-  id: "qqbot",
-  setupWizard: qqbotSetupWizard,
-  meta: {
-    id: "qqbot",
-    label: "QQ Bot",
-    selectionLabel: "QQ Bot",
-    docsPath: "/channels/qqbot",
-    blurb: "Connect to QQ via official QQ Bot API",
-    order: 50,
-  },
-  capabilities: {
-    chatTypes: ["direct", "group"],
-    media: true,
-    reactions: false,
-    threads: false,
-    /**
-     * blockStreaming=true means the channel supports block streaming.
-     * The framework collects streamed blocks and sends them through deliver().
-     */
-    blockStreaming: true,
-  },
-  reload: { configPrefixes: ["channels.qqbot"] },
-  configSchema: qqbotChannelConfigSchema,
+function loadOutboundModule(): Promise<QQBotOutboundModule> {
+  _outboundModulePromise ??= import("./outbound.js");
+  return _outboundModulePromise;
+}
 
-  config: {
-    listAccountIds: (cfg) => listQQBotAccountIds(cfg),
-    resolveAccount: (cfg, accountId) =>
-      resolveQQBotAccount(cfg, accountId, { allowUnresolvedSecretRef: true }),
-    defaultAccountId: (cfg) => resolveDefaultQQBotAccountId(cfg),
-    setAccountEnabled: ({ cfg, accountId, enabled }) =>
-      setAccountEnabledInConfigSection({
-        cfg,
-        sectionKey: "qqbot",
-        accountId,
-        enabled,
-        allowTopLevel: true,
-      }),
-    deleteAccount: ({ cfg, accountId }) =>
-      deleteAccountFromConfigSection({
-        cfg,
-        sectionKey: "qqbot",
-        accountId,
-        clearBaseFields: ["appId", "clientSecret", "clientSecretFile", "name"],
-      }),
-    isConfigured: (account) =>
-      Boolean(
-        account?.appId &&
-        (Boolean(account?.clientSecret) ||
-          hasConfiguredSecretInput(account?.config?.clientSecret) ||
-          Boolean(account?.config?.clientSecretFile?.trim())),
-      ),
-    describeAccount: (account) => ({
-      accountId: account?.accountId ?? DEFAULT_ACCOUNT_ID,
-      name: account?.name,
-      enabled: account?.enabled ?? false,
-      configured: Boolean(
-        account?.appId &&
-        (Boolean(account?.clientSecret) ||
-          hasConfiguredSecretInput(account?.config?.clientSecret) ||
-          Boolean(account?.config?.clientSecretFile?.trim())),
-      ),
-      tokenSource: account?.secretSource,
-    }),
-    resolveAllowFrom: ({ cfg, accountId }) => {
-      const account = resolveQQBotAccount(cfg, accountId, { allowUnresolvedSecretRef: true });
-      const allowFrom = account.config?.allowFrom;
-      return allowFrom;
-    },
-    // Normalize allowFrom entries by removing the qqbot: prefix and uppercasing IDs.
-    formatAllowFrom: ({ allowFrom }) =>
-      (allowFrom ?? [])
-        .map((entry) => String(entry).trim())
-        .filter(Boolean)
-        .map((entry) => entry.replace(/^qqbot:/i, ""))
-        .map((entry) => entry.toUpperCase()),
-  },
-  setup: {
-    resolveAccountId: ({ accountId }) => accountId?.trim().toLowerCase() || DEFAULT_ACCOUNT_ID,
-    applyAccountName: ({ cfg, accountId, name }) =>
-      applyAccountNameToChannelSection({
-        cfg,
-        channelKey: "qqbot",
-        accountId,
-        name,
-      }),
-    validateInput: ({ accountId, input }) => validateQQBotSetupInput({ accountId, input }),
-    applyAccountConfig: ({ cfg, accountId, input }) =>
-      applyQQBotSetupAccountConfig({ cfg, accountId, input }),
-  },
+export const qqbotPlugin: ChannelPlugin<ResolvedQQBotAccount> = {
+  ...qqbotBasePluginFields,
   messaging: {
     /** Normalize common QQ Bot target formats into the canonical qqbot:... form. */
     normalizeTarget: (target: string): string | undefined => {
@@ -166,7 +74,7 @@ export const qqbotPlugin: ChannelPlugin<ResolvedQQBotAccount> = {
     textChunkLimit: 5000,
     sendText: async ({ to, text, accountId, replyToId, cfg }) => {
       const account = resolveQQBotAccount(cfg, accountId);
-      const { sendText } = await import("./outbound.js");
+      const { sendText } = await loadOutboundModule();
       initApiConfig(account.appId, { markdownSupport: account.markdownSupport });
       const result = await sendText({ to, text, accountId, replyToId, account });
       return {
@@ -177,7 +85,7 @@ export const qqbotPlugin: ChannelPlugin<ResolvedQQBotAccount> = {
     },
     sendMedia: async ({ to, text, mediaUrl, accountId, replyToId, cfg }) => {
       const account = resolveQQBotAccount(cfg, accountId);
-      const { sendMedia } = await import("./outbound.js");
+      const { sendMedia } = await loadOutboundModule();
       initApiConfig(account.appId, { markdownSupport: account.markdownSupport });
       const result = await sendMedia({
         to,
