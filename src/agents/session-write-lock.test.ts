@@ -9,6 +9,7 @@ let acquireSessionWriteLock: typeof import("./session-write-lock.js").acquireSes
 let cleanStaleLockFiles: typeof import("./session-write-lock.js").cleanStaleLockFiles;
 let resetSessionWriteLockStateForTest: typeof import("./session-write-lock.js").resetSessionWriteLockStateForTest;
 let resolveSessionLockMaxHoldFromTimeout: typeof import("./session-write-lock.js").resolveSessionLockMaxHoldFromTimeout;
+let resolveSessionWriteLockConfig: typeof import("./session-write-lock.js").resolveSessionWriteLockConfig;
 
 vi.mock("../shared/pid-alive.js", async () => {
   const original =
@@ -133,6 +134,7 @@ describe("acquireSessionWriteLock", () => {
       cleanStaleLockFiles,
       resetSessionWriteLockStateForTest,
       resolveSessionLockMaxHoldFromTimeout,
+      resolveSessionWriteLockConfig,
     } = await import("./session-write-lock.js"));
   });
 
@@ -538,5 +540,55 @@ describe("acquireSessionWriteLock", () => {
       process.off("SIGINT", keepAlive);
       process.kill = originalKill;
     }
+  });
+});
+
+describe("resolveSessionWriteLockConfig", () => {
+  it("returns defaults when no config is provided", () => {
+    const result = resolveSessionWriteLockConfig();
+    expect(result.timeoutMs).toBe(10_000);
+    expect(result.backoffBaseMs).toBe(50);
+    expect(result.backoffCapMs).toBe(1_000);
+    expect(result.backoffJitterMs).toBe(0);
+  });
+
+  it("applies provided writeLock overrides", () => {
+    const result = resolveSessionWriteLockConfig({
+      session: {
+        writeLock: {
+          timeoutMs: 30_000,
+          backoffBaseMs: 25,
+          backoffCapMs: 500,
+          backoffJitterMs: 10,
+        },
+      },
+    } as unknown as import("../config/config.js").OpenClawConfig);
+    expect(result.timeoutMs).toBe(30_000);
+    expect(result.backoffBaseMs).toBe(25);
+    expect(result.backoffCapMs).toBe(500);
+    expect(result.backoffJitterMs).toBe(10);
+  });
+
+  it("caps backoffCapMs at backoffBaseMs when lower", () => {
+    const result = resolveSessionWriteLockConfig({
+      session: {
+        writeLock: {
+          backoffBaseMs: 500,
+          backoffCapMs: 100,
+        },
+      },
+    } as unknown as import("../config/config.js").OpenClawConfig);
+    expect(result.backoffCapMs).toBe(500);
+  });
+
+  it("clamps negative jitter to default", () => {
+    const result = resolveSessionWriteLockConfig({
+      session: {
+        writeLock: {
+          backoffJitterMs: -5,
+        },
+      },
+    } as unknown as import("../config/config.js").OpenClawConfig);
+    expect(result.backoffJitterMs).toBe(0);
   });
 });
