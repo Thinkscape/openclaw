@@ -603,17 +603,6 @@ async function agentCommandInternal(
                   agentId: sessionAgentId,
                 }),
               }),
-          return buildWorkspaceSkillSnapshot(workspaceDir, {
-            config: cfg,
-            eligibility: {
-              remote: getRemoteSkillEligibility({
-                advertiseExecNode: canExecRequestNode({
-                  cfg,
-                  sessionEntry,
-                  sessionKey,
-                  agentId: sessionAgentId,
-                }),
-              }),
             },
             snapshotVersion: skillsSnapshotVersion,
             sessionKey,
