@@ -342,7 +342,7 @@ main() {
   # Keep release validation scoped to the fork-managed patch surfaces.
   # The broader loadConfig/temp-home suites have upstream hangs on v2026.4.5
   # and are not specific to the release patch set being applied here.
-  pnpm vitest run \
+  node scripts/test-projects.mjs \
     src/config/zod-schema.session-maintenance-extensions.test.ts \
     src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts \
     src/agents/session-write-lock.test.ts
