@@ -130,6 +130,13 @@ See [MCP](/cli/mcp#openclaw-as-an-mcp-client-registry) and
   skills: {
     allowBundled: ["gemini", "peekaboo"],
     load: {
+      promptPathAliases: [
+        {
+          from: "/home/node/.openclaw/shared/skills",
+          to: "/shared/skills",
+          when: "sandbox",
+        },
+      ],
       extraDirs: ["~/Projects/agent-scripts/skills"],
     },
     install: {
@@ -150,6 +157,10 @@ See [MCP](/cli/mcp#openclaw-as-an-mcp-client-registry) and
 
 - `allowBundled`: optional allowlist for bundled skills only (managed/workspace skills unaffected).
 - `load.extraDirs`: extra shared skill roots (lowest precedence).
+- `load.promptPathAliases`: optional prompt-facing path rewrites for discovered skill locations.
+- `load.promptPathAliases[].from`: source path prefix to match against canonical skill locations.
+- `load.promptPathAliases[].to`: replacement path prefix shown to agents in the skills prompt.
+- `load.promptPathAliases[].when`: apply the alias in all runs or only sandboxed runs (`always` or `sandbox`).
 - `install.preferBrew`: when true, prefer Homebrew installers when `brew` is
   available before falling back to other installer kinds.
 - `install.nodeManager`: node installer preference for `metadata.openclaw.install`
