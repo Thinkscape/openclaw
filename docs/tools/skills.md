@@ -41,9 +41,14 @@ In **multi-agent** setups each agent has its own workspace:
 | Shared managed/local | `~/.openclaw/skills`                        | All agents on that machine  |
 | Shared extra dirs    | `skills.load.extraDirs` (lowest precedence) | All agents on that machine  |
 
-Same name in multiple places → highest source wins. Workspace beats
-project-agent, beats personal-agent, beats managed/local, beats bundled,
-beats extra dirs.
+If those shared folders are loaded from a gateway-only path but exposed inside a
+sandbox through a bind mount, add `skills.load.promptPathAliases` so the agent
+sees a readable `<location>` such as `/shared/skills/...` instead of the
+gateway-local source path.
+
+If the same skill name exists in more than one place, the usual precedence
+applies: workspace wins, then project agent skills, then personal agent skills,
+then managed/local, then bundled, then extra dirs.
 
 ## Agent skill allowlists
 

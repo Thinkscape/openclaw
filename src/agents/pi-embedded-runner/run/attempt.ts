@@ -720,6 +720,7 @@ export async function runEmbeddedAttempt(
       skillsSnapshot: params.skillsSnapshot,
       entries: shouldLoadSkillEntries ? skillEntries : undefined,
       config: params.config,
+      sessionKey: params.sessionKey,
       workspaceDir: effectiveWorkspace,
       agentId: sessionAgentId,
     });
