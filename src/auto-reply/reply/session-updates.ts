@@ -155,6 +155,7 @@ export async function ensureSkillSnapshot(params: {
       skillFilter,
       eligibility: { remote: remoteEligibility },
       snapshotVersion,
+      sessionKey,
     });
 
   if (isFirstTurnInSession && sessionStore && sessionKey) {

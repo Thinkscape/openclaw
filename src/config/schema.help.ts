@@ -690,6 +690,14 @@ export const FIELD_HELP: Record<string, string> = {
     "Ordered model preferences specifically for video understanding before shared media fallback applies. Prioritize models with strong multimodal video support to minimize degraded summaries.",
   "tools.media.video.scope":
     "Scope selector controlling when video understanding is attempted across incoming events. Narrow scope in noisy channels, and broaden only where video interpretation is core to workflow.",
+  "skills.load.promptPathAliases":
+    "Optional prompt-facing path alias rules for skill locations. Use these when skills are discovered from a host or gateway path but must be read through a different runtime-visible path such as a sandbox bind mount.",
+  "skills.load.promptPathAliases[].from":
+    "Canonical source path prefix to match against discovered SKILL.md locations before rendering the skills prompt. This should point at the host or gateway-visible directory returned by skill discovery, for example `/home/node/.openclaw/shared/skills`.",
+  "skills.load.promptPathAliases[].to":
+    "Replacement path prefix shown to the agent in the skills prompt when a matching source path is found. Point this at the runtime-visible location the read tool can actually open, for example `/shared/skills` inside a sandbox.",
+  "skills.load.promptPathAliases[].when":
+    'Controls when the alias applies: `"always"` rewrites prompt locations in every run, while `"sandbox"` only rewrites them for sandboxed sessions.',
   "skills.load.watch":
     "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
   "skills.load.watchDebounceMs":

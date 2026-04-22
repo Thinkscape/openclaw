@@ -469,6 +469,7 @@ export async function compactEmbeddedPiSessionDirect(
       skillsSnapshot: params.skillsSnapshot,
       entries: shouldLoadSkillEntries ? skillEntries : undefined,
       config: params.config,
+      sessionKey: params.sessionKey,
       workspaceDir: effectiveWorkspace,
       agentId: effectiveSkillAgentId,
     });
