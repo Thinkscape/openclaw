@@ -2,7 +2,7 @@
 summary: "Setup guide for developers working on the OpenClaw macOS app"
 read_when:
   - Setting up the macOS development environment
-title: "macOS Dev Setup"
+title: "macOS dev setup"
 ---
 
 # macOS Developer Setup
@@ -54,6 +54,9 @@ Alternatively, install it manually:
 ```bash
 npm install -g openclaw@<version>
 ```
+
+`pnpm add -g openclaw@<version>` and `bun add -g openclaw@<version>` also work.
+For the Gateway runtime, Node remains the recommended path.
 
 ## Troubleshooting
 

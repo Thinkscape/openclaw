@@ -6,8 +6,6 @@ read_when:
 title: "Matrix migration"
 ---
 
-# Matrix migration
-
 This page covers upgrades from the previous public `matrix` plugin to the current implementation.
 
 For most users, the upgrade is in place:
@@ -275,7 +273,10 @@ If the old store reports room keys that were never backed up, OpenClaw warns ins
 - Meaning: the stored key does not match the active Matrix backup.
 - What to do: rerun `openclaw matrix verify device "<your-recovery-key>"` with the correct key.
 
-If you accept losing unrecoverable old encrypted history, you can instead reset the current backup baseline with `openclaw matrix verify backup reset --yes`.
+If you accept losing unrecoverable old encrypted history, you can instead reset the
+current backup baseline with `openclaw matrix verify backup reset --yes`. When the
+stored backup secret is broken, that reset may also recreate secret storage so the
+new backup key can load correctly after restart.
 
 `Backup trust chain is not verified on this device. Re-run 'openclaw matrix verify device <key>'.`
 
