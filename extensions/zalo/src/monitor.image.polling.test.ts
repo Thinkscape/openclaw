@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRuntimeEnv } from "../../../test/helpers/plugins/runtime-env.js";
 import {
   createImageLifecycleCore,
@@ -28,7 +28,7 @@ describe("Zalo polling image handling", () => {
     getZaloRuntimeMock.mockReturnValue(core);
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await resetLifecycleTestState();
   });
 
@@ -71,7 +71,11 @@ describe("Zalo polling image handling", () => {
     getUpdatesMock
       .mockResolvedValueOnce({
         ok: true,
-        result: createImageUpdate(),
+        result: createImageUpdate({
+          messageId: "msg-unauthorized-1",
+          userId: "user-unauthorized-1",
+          chatId: "chat-unauthorized-1",
+        }),
       })
       .mockImplementation(() => new Promise(() => {}));
 

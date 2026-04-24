@@ -1,12 +1,15 @@
 import type { Api, Model } from "@mariozechner/pi-ai";
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
-import type { AuthProfileStore } from "../../agents/auth-profiles.js";
-import { loadModelCatalog } from "../../agents/model-catalog.js";
+import type { AuthProfileStore } from "../../agents/auth-profiles/types.js";
 import { shouldSuppressBuiltInModel } from "../../agents/model-suppression.js";
-import { resolveModelWithRegistry } from "../../agents/pi-embedded-runner/model.js";
 import { normalizeProviderId } from "../../agents/provider-id.js";
-import type { OpenClawConfig } from "../../config/config.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { loadModelRegistry, toModelRow } from "./list.registry.js";
+import {
+  loadModelCatalog,
+  loadProviderCatalogModelsForList,
+  resolveModelWithRegistry,
+} from "./list.runtime.js";
 import type { ConfiguredEntry, ModelRow } from "./list.types.js";
 import { isLocalBaseUrl, modelKey } from "./shared.js";
 
@@ -19,11 +22,13 @@ type RowFilter = {
 
 type RowBuilderContext = {
   cfg: OpenClawConfig;
+  agentDir: string;
   authStore: AuthProfileStore;
   availableKeys?: Set<string>;
   configuredByKey: ConfiguredByKey;
   discoveredKeys: Set<string>;
   filter: RowFilter;
+  skipRuntimeModelSuppression?: boolean;
 };
 
 function matchesRowFilter(filter: RowFilter, model: { provider: string; baseUrl?: string }) {
@@ -55,9 +60,24 @@ function buildRow(params: {
   });
 }
 
+function shouldSuppressListModel(params: {
+  model: { provider: string; id: string; baseUrl?: string };
+  context: RowBuilderContext;
+}): boolean {
+  if (params.context.skipRuntimeModelSuppression) {
+    return false;
+  }
+  return shouldSuppressBuiltInModel({
+    provider: params.model.provider,
+    id: params.model.id,
+    baseUrl: params.model.baseUrl,
+    config: params.context.cfg,
+  });
+}
+
 export async function loadListModelRegistry(
   cfg: OpenClawConfig,
-  opts?: { sourceConfig?: OpenClawConfig },
+  opts?: { sourceConfig?: OpenClawConfig; providerFilter?: string },
 ) {
   const loaded = await loadModelRegistry(cfg, opts);
   return {
@@ -81,7 +101,7 @@ export function appendDiscoveredRows(params: {
   });
 
   for (const model of sorted) {
-    if (shouldSuppressBuiltInModel({ provider: model.provider, id: model.id })) {
+    if (shouldSuppressListModel({ model, context: params.context })) {
       continue;
     }
     if (!matchesRowFilter(params.context.filter, model)) {
@@ -128,6 +148,51 @@ export async function appendCatalogSupplementRows(params: {
     if (!model || !matchesRowFilter(params.context.filter, model)) {
       continue;
     }
+    if (shouldSuppressListModel({ model, context: params.context })) {
+      continue;
+    }
+    params.rows.push(
+      buildRow({
+        model,
+        key,
+        context: params.context,
+        allowProviderAvailabilityFallback: !params.context.discoveredKeys.has(key),
+      }),
+    );
+    params.seenKeys.add(key);
+  }
+
+  if (params.context.filter.local) {
+    return;
+  }
+
+  await appendProviderCatalogRows({
+    rows: params.rows,
+    context: params.context,
+    seenKeys: params.seenKeys,
+  });
+}
+
+export async function appendProviderCatalogRows(params: {
+  rows: ModelRow[];
+  context: RowBuilderContext;
+  seenKeys: Set<string>;
+}): Promise<void> {
+  for (const model of await loadProviderCatalogModelsForList({
+    cfg: params.context.cfg,
+    agentDir: params.context.agentDir,
+    providerFilter: params.context.filter.provider,
+  })) {
+    if (!matchesRowFilter(params.context.filter, model)) {
+      continue;
+    }
+    if (shouldSuppressListModel({ model, context: params.context })) {
+      continue;
+    }
+    const key = modelKey(model.provider, model.id);
+    if (params.seenKeys.has(key)) {
+      continue;
+    }
     params.rows.push(
       buildRow({
         model,
@@ -163,6 +228,9 @@ export function appendConfiguredRows(params: {
       continue;
     }
     if (params.context.filter.local && !model) {
+      continue;
+    }
+    if (model && shouldSuppressListModel({ model, context: params.context })) {
       continue;
     }
     params.rows.push(
