@@ -4,9 +4,12 @@ export type ReplyMode = "text" | "command";
 export type TypingMode = "never" | "instant" | "thinking" | "message";
 export type SessionScope = "per-sender" | "global";
 export type DmScope = "main" | "per-peer" | "per-channel-peer" | "per-account-channel-peer";
-export type ReplyToMode = "off" | "first" | "all";
+export type ReplyToMode = "off" | "first" | "all" | "batched";
 export type GroupPolicy = "open" | "disabled" | "allowlist";
 export type DmPolicy = "pairing" | "allowlist" | "open" | "disabled";
+export type ContextVisibilityMode = "all" | "allowlist" | "allowlist_quote";
+export type TextChunkMode = "length" | "newline";
+export type StreamingMode = "off" | "partial" | "block" | "progress";
 
 export type OutboundRetryConfig = {
   /** Max retry attempts for outbound requests (default: 3). */
@@ -30,6 +33,56 @@ export type BlockStreamingChunkConfig = {
   maxChars?: number;
   breakPreference?: "paragraph" | "newline" | "sentence";
 };
+
+export type ChannelStreamingPreviewConfig = {
+  /** Chunking thresholds for preview-draft updates while streaming. */
+  chunk?: BlockStreamingChunkConfig;
+  /**
+   * Render live tool/activity updates into the preview draft for channels that
+   * edit a single preview message in place.
+   * Default: true.
+   */
+  toolProgress?: boolean;
+};
+
+export type ChannelStreamingBlockConfig = {
+  /** Enable chunked block-reply delivery for channels that support it. */
+  enabled?: boolean;
+  /** Merge streamed block replies before sending. */
+  coalesce?: BlockStreamingCoalesceConfig;
+};
+
+export type ChannelStreamingConfig = {
+  /**
+   * Preview streaming mode:
+   * - "off": disable preview updates
+   * - "partial": update one preview in place
+   * - "block": emit larger chunked preview updates
+   * - "progress": progress/status preview mode for channels that support it
+   */
+  mode?: StreamingMode;
+  /** Chunking mode for outbound text delivery. */
+  chunkMode?: TextChunkMode;
+  /**
+   * Channel-specific native transport streaming toggle.
+   * Used today by Slack's native stream API.
+   */
+  nativeTransport?: boolean;
+  preview?: ChannelStreamingPreviewConfig;
+  block?: ChannelStreamingBlockConfig;
+};
+
+export type ChannelDeliveryStreamingConfig = Pick<ChannelStreamingConfig, "chunkMode" | "block">;
+
+export type ChannelPreviewStreamingConfig = Pick<
+  ChannelStreamingConfig,
+  "mode" | "chunkMode" | "preview" | "block"
+>;
+
+export type SlackChannelStreamingConfig = Pick<
+  ChannelStreamingConfig,
+  "mode" | "chunkMode" | "preview" | "block" | "nativeTransport"
+>;
 
 export type MarkdownTableMode = "off" | "bullets" | "code" | "block";
 
@@ -131,21 +184,8 @@ export type SessionConfig = {
   };
   /** Shared defaults for thread-bound session routing across channels/providers. */
   threadBindings?: SessionThreadBindingsConfig;
-  /** Session write-lock contention behavior and timeout tuning. */
-  writeLock?: SessionWriteLockConfig;
   /** Automatic session store maintenance (pruning, capping, file rotation). */
   maintenance?: SessionMaintenanceConfig;
-};
-
-export type SessionWriteLockConfig = {
-  /** Default lock acquisition timeout in milliseconds when callers do not specify one. Default: 10000. */
-  timeoutMs?: number;
-  /** Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50. */
-  backoffBaseMs?: number;
-  /** Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000. */
-  backoffCapMs?: number;
-  /** Optional additive random jitter in milliseconds for contended lock retries. Default: 0. */
-  backoffJitterMs?: number;
 };
 
 export type SessionMaintenanceMode = "enforce" | "warn";
@@ -181,19 +221,22 @@ export type SessionMaintenanceConfig = {
 export type LoggingConfig = {
   level?: "silent" | "fatal" | "error" | "warn" | "info" | "debug" | "trace";
   file?: string;
-  /** Maximum size of a single log file in bytes before writes are suppressed. Default: 500 MB. */
+  /** Maximum size of a single log file in bytes before rotation. Default: 100 MB. */
   maxFileBytes?: number;
   consoleLevel?: "silent" | "fatal" | "error" | "warn" | "info" | "debug" | "trace";
   consoleStyle?: "pretty" | "compact" | "json";
-  /** Redact sensitive tokens in tool summaries. Default: "tools". */
+  /** Redact sensitive tokens in log sinks and persisted transcript text. Default: "tools". */
   redactSensitive?: "off" | "tools";
-  /** Regex patterns used to redact sensitive tokens (defaults apply when unset). */
+  /** Regex patterns used to redact sensitive tokens from logs and transcripts. */
   redactPatterns?: string[];
 };
 
 export type DiagnosticsOtelConfig = {
   enabled?: boolean;
   endpoint?: string;
+  tracesEndpoint?: string;
+  metricsEndpoint?: string;
+  logsEndpoint?: string;
   protocol?: "http/protobuf" | "grpc";
   headers?: Record<string, string>;
   serviceName?: string;
@@ -204,6 +247,21 @@ export type DiagnosticsOtelConfig = {
   sampleRate?: number;
   /** Metric export interval (ms). */
   flushIntervalMs?: number;
+  /**
+   * Opt-in raw content capture for OTEL span attributes.
+   * Boolean `true` captures non-system message/tool content; the object form
+   * can enable each content class explicitly.
+   */
+  captureContent?:
+    | boolean
+    | {
+        enabled?: boolean;
+        inputMessages?: boolean;
+        outputMessages?: boolean;
+        toolInputs?: boolean;
+        toolOutputs?: boolean;
+        systemPrompt?: boolean;
+      };
 };
 
 export type DiagnosticsCacheTraceConfig = {
