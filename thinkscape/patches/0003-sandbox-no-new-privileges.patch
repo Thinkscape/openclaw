@@ -1,0 +1,371 @@
+From c80af0f9e956e75681ecc69d432aafb64b568b2f Mon Sep 17 00:00:00 2001
+From: Artur Bodera <abodera@gmail.com>
+Date: Wed, 8 Apr 2026 14:55:01 +1000
+Subject: [PATCH] feat(sandbox): restore no-new-privileges override
+
+---
+ src/agents/sandbox-create-args.test.ts        | 15 +++++
+ src/agents/sandbox/config-hash.test.ts        | 18 ++++++
+ src/agents/sandbox/config.ts                  |  1 +
+ .../docker.config-hash-recreate.test.ts       | 56 +++++++++++++++++++
+ src/agents/sandbox/docker.ts                  |  4 +-
+ src/config/schema.help.ts                     |  4 ++
+ src/config/schema.labels.ts                   |  4 ++
+ src/config/types.sandbox.ts                   |  5 ++
+ src/config/zod-schema.agent-runtime.ts        |  1 +
+ src/security/audit-extra.sync.ts              | 14 +++++
+ .../audit-sandbox-docker-config.test.ts       | 22 ++++++++
+ src/security/dangerous-config-flags.test.ts   | 38 +++++++++++++
+ src/security/dangerous-config-flags.ts        |  8 +++
+ 13 files changed, 189 insertions(+), 1 deletion(-)
+
+diff --git a/src/agents/sandbox-create-args.test.ts b/src/agents/sandbox-create-args.test.ts
+index 60b6241f58..cf4b9f25d6 100644
+--- a/src/agents/sandbox-create-args.test.ts
++++ b/src/agents/sandbox-create-args.test.ts
+@@ -137,6 +137,21 @@ describe("buildSandboxCreateArgs", () => {
+     );
+   });
+ 
++  it("omits no-new-privileges when the dangerous override is enabled", () => {
++    const cfg = createSandboxConfig({
++      dangerouslyDisableNoNewPrivileges: true,
++    });
++
++    const args = buildSandboxCreateArgs({
++      name: "openclaw-sbx-no-new-privs",
++      cfg,
++      scopeKey: "main",
++      createdAtMs: 1700000000000,
++    });
++
++    expect(args).not.toEqual(expect.arrayContaining(["--security-opt", "no-new-privileges"]));
++  });
++
+   it("preserves the OpenClaw exec marker when strict env sanitization is enabled", () => {
+     const cfg = createSandboxConfig({
+       env: {
+diff --git a/src/agents/sandbox/config-hash.test.ts b/src/agents/sandbox/config-hash.test.ts
+index 7defa48e6d..f63b496a29 100644
+--- a/src/agents/sandbox/config-hash.test.ts
++++ b/src/agents/sandbox/config-hash.test.ts
+@@ -85,6 +85,24 @@ describe("computeSandboxConfigHash", () => {
+     expect(left).toBe(right);
+   });
+ 
++  it("changes when no-new-privileges override changes", () => {
++    const shared = {
++      workspaceAccess: "rw" as const,
++      workspaceDir: "/tmp/workspace",
++      agentWorkspaceDir: "/tmp/workspace",
++      mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
++    };
++    const left = computeSandboxConfigHash({
++      ...shared,
++      docker: createDockerConfig(),
++    });
++    const right = computeSandboxConfigHash({
++      ...shared,
++      docker: createDockerConfig({ dangerouslyDisableNoNewPrivileges: true }),
++    });
++    expect(left).not.toBe(right);
++  });
++
+   it.each(ORDER_SENSITIVE_ARRAY_CASES)("treats $field order as significant", (testCase) => {
+     const shared = {
+       workspaceAccess: "rw" as const,
+diff --git a/src/agents/sandbox/config.ts b/src/agents/sandbox/config.ts
+index 54a4c36aae..672df9b194 100644
+--- a/src/agents/sandbox/config.ts
++++ b/src/agents/sandbox/config.ts
+@@ -32,6 +32,7 @@ export const DANGEROUS_SANDBOX_DOCKER_BOOLEAN_KEYS = [
+   "dangerouslyAllowReservedContainerTargets",
+   "dangerouslyAllowExternalBindSources",
+   "dangerouslyAllowContainerNamespaceJoin",
++  "dangerouslyDisableNoNewPrivileges",
+ ] as const;
+ 
+ const DEFAULT_SANDBOX_SSH_COMMAND = "ssh";
+diff --git a/src/agents/sandbox/docker.config-hash-recreate.test.ts b/src/agents/sandbox/docker.config-hash-recreate.test.ts
+index 4242ab8c57..00ec2c8110 100644
+--- a/src/agents/sandbox/docker.config-hash-recreate.test.ts
++++ b/src/agents/sandbox/docker.config-hash-recreate.test.ts
+@@ -314,6 +314,62 @@ describe("ensureSandboxContainer config-hash recreation", () => {
+     },
+   );
+ 
++  it("recreates shared container when no-new-privileges override changes", async () => {
++    const workspaceDir = "/tmp/workspace";
++    const oldCfg = createSandboxConfig([]);
++    const newCfg = createSandboxConfig([]);
++    newCfg.docker.dangerouslyDisableNoNewPrivileges = true;
++
++    const oldHash = computeSandboxConfigHash({
++      docker: oldCfg.docker,
++      workspaceAccess: oldCfg.workspaceAccess,
++      workspaceDir,
++      agentWorkspaceDir: workspaceDir,
++      mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
++    });
++    const newHash = computeSandboxConfigHash({
++      docker: newCfg.docker,
++      workspaceAccess: newCfg.workspaceAccess,
++      workspaceDir,
++      agentWorkspaceDir: workspaceDir,
++      mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
++    });
++    expect(newHash).not.toBe(oldHash);
++
++    spawnState.labelHash = oldHash;
++    registryMocks.readRegistry.mockResolvedValue({
++      entries: [
++        {
++          containerName: "oc-test-shared",
++          sessionKey: "shared",
++          createdAtMs: 1,
++          lastUsedAtMs: 0,
++          image: newCfg.docker.image,
++          configHash: oldHash,
++        },
++      ],
++    });
++
++    await ensureSandboxContainer({
++      sessionKey: "agent:main:session-1",
++      workspaceDir,
++      agentWorkspaceDir: workspaceDir,
++      cfg: newCfg,
++    });
++
++    const dockerCalls = spawnState.calls.filter((call) => call.command === "docker");
++    expect(
++      dockerCalls.some(
++        (call) =>
++          call.args[0] === "rm" && call.args[1] === "-f" && call.args[2] === "oc-test-shared",
++      ),
++    ).toBe(true);
++    const createCall = dockerCalls.find((call) => call.args[0] === "create");
++    expect(createCall).toBeDefined();
++    expect(createCall?.args).toContain(`openclaw.configHash=${newHash}`);
++    expect(createCall?.args).not.toContain("no-new-privileges");
++  });
++
+   it("stamps the mount format version label on created containers", async () => {
+     const workspaceDir = "/tmp/workspace";
+     const cfg = createSandboxConfig([]);
+diff --git a/src/agents/sandbox/docker.ts b/src/agents/sandbox/docker.ts
+index c9da918049..dacc00e4a4 100644
+--- a/src/agents/sandbox/docker.ts
++++ b/src/agents/sandbox/docker.ts
+@@ -413,7 +413,9 @@ export function buildSandboxCreateArgs(params: {
+   for (const cap of params.cfg.capDrop) {
+     args.push("--cap-drop", cap);
+   }
+-  args.push("--security-opt", "no-new-privileges");
++  if (params.cfg.dangerouslyDisableNoNewPrivileges !== true) {
++    args.push("--security-opt", "no-new-privileges");
++  }
+   if (params.cfg.seccompProfile) {
+     args.push("--security-opt", `seccomp=${params.cfg.seccompProfile}`);
+   }
+diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
+index f2e397a67a..12df1771b3 100644
+--- a/src/config/schema.help.ts
++++ b/src/config/schema.help.ts
+@@ -396,6 +396,10 @@ export const FIELD_HELP: Record<string, string> = {
+     "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
+   "agents.list[].sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
+     "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
++  "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges":
++    "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
++  "agents.list[].sandbox.docker.dangerouslyDisableNoNewPrivileges":
++    "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
+   "agents.defaults.sandbox.browser.cdpSourceRange":
+     "Optional CIDR allowlist for container-edge CDP ingress (for example 172.21.0.1/32).",
+   "agents.list[].sandbox.browser.cdpSourceRange":
+diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
+index 3c0aacd2b7..681870c1ff 100644
+--- a/src/config/schema.labels.ts
++++ b/src/config/schema.labels.ts
+@@ -591,6 +591,8 @@ export const FIELD_LABELS: Record<string, string> = {
+   "agents.defaults.sandbox.browser.cdpSourceRange": "Sandbox Browser CDP Source Port Range",
+   "agents.defaults.sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
+     "Sandbox Docker Allow Container Namespace Join",
++  "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges":
++    "Sandbox Docker Disable No New Privileges",
+   commands: "Commands",
+   "commands.native": "Native Commands",
+   "commands.nativeSkills": "Native Skill Commands",
+@@ -828,6 +830,8 @@ export const FIELD_LABELS: Record<string, string> = {
+   "agents.list[].sandbox.browser.cdpSourceRange": "Agent Sandbox Browser CDP Source Port Range",
+   "agents.list[].sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
+     "Agent Sandbox Docker Allow Container Namespace Join",
++  "agents.list[].sandbox.docker.dangerouslyDisableNoNewPrivileges":
++    "Agent Sandbox Docker Disable No New Privileges",
+   "discovery.mdns.mode": "mDNS Discovery Mode",
+   plugins: "Plugins",
+   "plugins.enabled": "Enable Plugins",
+diff --git a/src/config/types.sandbox.ts b/src/config/types.sandbox.ts
+index 04128e2ffa..438de9be80 100644
+--- a/src/config/types.sandbox.ts
++++ b/src/config/types.sandbox.ts
+@@ -59,6 +59,11 @@ export type SandboxDockerSettings = {
+    * Default behavior blocks container namespace joins to preserve sandbox isolation.
+    */
+   dangerouslyAllowContainerNamespaceJoin?: boolean;
++  /**
++   * Dangerous override: disable Docker's no-new-privileges hardening.
++   * This permits setuid elevation such as sudo inside the sandbox.
++   */
++  dangerouslyDisableNoNewPrivileges?: boolean;
+ };
+ 
+ export type SandboxBrowserSettings = {
+diff --git a/src/config/zod-schema.agent-runtime.ts b/src/config/zod-schema.agent-runtime.ts
+index 5401abeb34..d4b045897a 100644
+--- a/src/config/zod-schema.agent-runtime.ts
++++ b/src/config/zod-schema.agent-runtime.ts
+@@ -141,6 +141,7 @@ export const SandboxDockerSchema = z
+     dangerouslyAllowReservedContainerTargets: z.boolean().optional(),
+     dangerouslyAllowExternalBindSources: z.boolean().optional(),
+     dangerouslyAllowContainerNamespaceJoin: z.boolean().optional(),
++    dangerouslyDisableNoNewPrivileges: z.boolean().optional(),
+   })
+   .strict()
+   .superRefine((data, ctx) => {
+diff --git a/src/security/audit-extra.sync.ts b/src/security/audit-extra.sync.ts
+index 7200d846c0..db42aed1b6 100644
+--- a/src/security/audit-extra.sync.ts
++++ b/src/security/audit-extra.sync.ts
+@@ -843,6 +843,20 @@ export function collectSandboxDangerousConfigFindings(cfg: OpenClawConfig): Secu
+         remediation: `Remove ${source}.apparmorProfile or use a named AppArmor profile.`,
+       });
+     }
++
++    if (docker.dangerouslyDisableNoNewPrivileges === true) {
++      findings.push({
++        checkId: "sandbox.dangerous_no_new_privileges_disabled",
++        severity: "critical",
++        title: "Sandbox no-new-privileges hardening is disabled",
++        detail:
++          `${source}.dangerouslyDisableNoNewPrivileges=true disables Docker's no-new-privileges ` +
++          "guard and allows setuid elevation such as sudo inside sandbox containers.",
++        remediation:
++          `Remove ${source}.dangerouslyDisableNoNewPrivileges or set it to false unless sandbox ` +
++          "privilege escalation is intentionally required.",
++      });
++    }
+   }
+ 
+   // CDP source range is now auto-derived at runtime from the Docker network gateway
+diff --git a/src/security/audit-sandbox-docker-config.test.ts b/src/security/audit-sandbox-docker-config.test.ts
+index 5eb631bd8f..0b7a3751b9 100644
+--- a/src/security/audit-sandbox-docker-config.test.ts
++++ b/src/security/audit-sandbox-docker-config.test.ts
+@@ -148,6 +148,28 @@ describe("security audit sandbox docker config", () => {
+             },
+           ],
+         },
++        {
++          name: "no-new-privileges disabled",
++          cfg: {
++            agents: {
++              defaults: {
++                sandbox: {
++                  mode: "all",
++                  docker: {
++                    dangerouslyDisableNoNewPrivileges: true,
++                  },
++                },
++              },
++            },
++          } as OpenClawConfig,
++          expectedFindings: [
++            {
++              checkId: "sandbox.dangerous_no_new_privileges_disabled",
++              severity: "critical",
++              title: "Sandbox no-new-privileges hardening is disabled",
++            },
++          ],
++        },
+       ] as const;
+ 
+       await Promise.all(
+diff --git a/src/security/dangerous-config-flags.test.ts b/src/security/dangerous-config-flags.test.ts
+index 198059c4d6..9d9b1c84be 100644
+--- a/src/security/dangerous-config-flags.test.ts
++++ b/src/security/dangerous-config-flags.test.ts
+@@ -49,6 +49,44 @@ describe("collectEnabledInsecureOrDangerousFlags", () => {
+     ).toContain("plugins.entries.acpx.config.permissionMode=approve-all");
+   });
+ 
++  it("collects sandbox no-new-privileges dangerous flags", () => {
++    loadPluginManifestRegistryMock.mockReturnValue({
++      plugins: [],
++      diagnostics: [],
++    });
++
++    expect(
++      collectEnabledInsecureOrDangerousFlags(
++        asConfig({
++          agents: {
++            defaults: {
++              sandbox: {
++                docker: {
++                  dangerouslyDisableNoNewPrivileges: true,
++                },
++              },
++            },
++            list: [
++              {
++                id: "sudo-agent",
++                sandbox: {
++                  docker: {
++                    dangerouslyDisableNoNewPrivileges: true,
++                  },
++                },
++              },
++            ],
++          },
++        }),
++      ),
++    ).toEqual(
++      expect.arrayContaining([
++        "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges=true",
++        "agents.list.sudo-agent.sandbox.docker.dangerouslyDisableNoNewPrivileges=true",
++      ]),
++    );
++  });
++
+   it("ignores plugin config values that are not declared as dangerous", () => {
+     loadPluginManifestRegistryMock.mockReturnValue({
+       plugins: [
+diff --git a/src/security/dangerous-config-flags.ts b/src/security/dangerous-config-flags.ts
+index 1d50a9abed..8fcf7bf978 100644
+--- a/src/security/dangerous-config-flags.ts
++++ b/src/security/dangerous-config-flags.ts
+@@ -71,6 +71,9 @@ export function collectEnabledInsecureOrDangerousFlags(cfg: OpenClawConfig): str
+   if (cfg.tools?.fs?.workspaceOnly === false) {
+     enabledFlags.push("tools.fs.workspaceOnly=false");
+   }
++  if (cfg.agents?.defaults?.sandbox?.docker?.dangerouslyDisableNoNewPrivileges === true) {
++    enabledFlags.push("agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges=true");
++  }
+   collectSandboxDockerDangerousFlags(
+     isRecord(cfg.agents?.defaults?.sandbox?.docker)
+       ? cfg.agents?.defaults?.sandbox?.docker
+@@ -79,6 +82,11 @@ export function collectEnabledInsecureOrDangerousFlags(cfg: OpenClawConfig): str
+   );
+   if (Array.isArray(cfg.agents?.list)) {
+     for (const [index, agent] of cfg.agents.list.entries()) {
++      if (agent?.id && agent.sandbox?.docker?.dangerouslyDisableNoNewPrivileges === true) {
++        enabledFlags.push(
++          `agents.list.${index}.sandbox.docker.dangerouslyDisableNoNewPrivileges=true`,
++        );
++      }
+       collectSandboxDockerDangerousFlags(
+         isRecord(agent?.sandbox?.docker) ? agent.sandbox.docker : undefined,
+         `${getAgentDangerousFlagPathSegment(agent, index)}.sandbox.docker`,
+-- 
+2.53.0
+

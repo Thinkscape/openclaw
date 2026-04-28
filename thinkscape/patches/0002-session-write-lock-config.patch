@@ -1,0 +1,347 @@
+From ecf35e4f99cb42319fa973d274d2f6bff1903834 Mon Sep 17 00:00:00 2001
+From: Artur Bodera <abodera@gmail.com>
+Date: Wed, 22 Apr 2026 10:21:42 +1000
+Subject: [PATCH] chore(release-sync): refresh session-write-lock patch for
+ v2026.4.20 base
+
+The upstream v2026.4.20 refactored session-write-lock.ts and reverted
+the write-lock backoff config. Re-apply the patch on top of the new
+upstream code with the updated file structure (new watchdog helpers,
+exit handler refactor, etc).
+---
+ src/agents/session-write-lock.test.ts | 52 +++++++++++++++++++++++
+ src/agents/session-write-lock.ts      | 61 ++++++++++++++++++++++++++-
+ src/config/schema.base.generated.ts   | 51 ++++++++++++++++++++++
+ src/config/schema.help.ts             | 10 +++++
+ src/config/schema.labels.ts           |  5 +++
+ src/config/types.base.ts              | 13 ++++++
+ src/config/zod-schema.session.ts      |  9 ++++
+ 7 files changed, 199 insertions(+), 2 deletions(-)
+
+diff --git a/src/agents/session-write-lock.test.ts b/src/agents/session-write-lock.test.ts
+index 637aa4dfdf..6b2f432839 100644
+--- a/src/agents/session-write-lock.test.ts
++++ b/src/agents/session-write-lock.test.ts
+@@ -9,6 +9,7 @@ let acquireSessionWriteLock: typeof import("./session-write-lock.js").acquireSes
+ let cleanStaleLockFiles: typeof import("./session-write-lock.js").cleanStaleLockFiles;
+ let resetSessionWriteLockStateForTest: typeof import("./session-write-lock.js").resetSessionWriteLockStateForTest;
+ let resolveSessionLockMaxHoldFromTimeout: typeof import("./session-write-lock.js").resolveSessionLockMaxHoldFromTimeout;
++let resolveSessionWriteLockConfig: typeof import("./session-write-lock.js").resolveSessionWriteLockConfig;
+ 
+ vi.mock("../shared/pid-alive.js", async () => {
+   const original =
+@@ -101,6 +102,7 @@ describe("acquireSessionWriteLock", () => {
+       cleanStaleLockFiles,
+       resetSessionWriteLockStateForTest,
+       resolveSessionLockMaxHoldFromTimeout,
++      resolveSessionWriteLockConfig,
+     } = await import("./session-write-lock.js"));
+   });
+ 
+@@ -520,3 +522,53 @@ describe("acquireSessionWriteLock", () => {
+     }
+   });
+ });
++
++describe("resolveSessionWriteLockConfig", () => {
++  it("returns defaults when no config is provided", () => {
++    const result = resolveSessionWriteLockConfig();
++    expect(result.timeoutMs).toBe(10_000);
++    expect(result.backoffBaseMs).toBe(50);
++    expect(result.backoffCapMs).toBe(1_000);
++    expect(result.backoffJitterMs).toBe(0);
++  });
++
++  it("applies provided writeLock overrides", () => {
++    const result = resolveSessionWriteLockConfig({
++      session: {
++        writeLock: {
++          timeoutMs: 30_000,
++          backoffBaseMs: 25,
++          backoffCapMs: 500,
++          backoffJitterMs: 10,
++        },
++      },
++    } as unknown as import("../config/config.js").OpenClawConfig);
++    expect(result.timeoutMs).toBe(30_000);
++    expect(result.backoffBaseMs).toBe(25);
++    expect(result.backoffCapMs).toBe(500);
++    expect(result.backoffJitterMs).toBe(10);
++  });
++
++  it("caps backoffCapMs at backoffBaseMs when lower", () => {
++    const result = resolveSessionWriteLockConfig({
++      session: {
++        writeLock: {
++          backoffBaseMs: 500,
++          backoffCapMs: 100,
++        },
++      },
++    } as unknown as import("../config/config.js").OpenClawConfig);
++    expect(result.backoffCapMs).toBe(500);
++  });
++
++  it("clamps negative jitter to default", () => {
++    const result = resolveSessionWriteLockConfig({
++      session: {
++        writeLock: {
++          backoffJitterMs: -5,
++        },
++      },
++    } as unknown as import("../config/config.js").OpenClawConfig);
++    expect(result.backoffJitterMs).toBe(0);
++  });
++});
+diff --git a/src/agents/session-write-lock.ts b/src/agents/session-write-lock.ts
+index e0113c9676..1a62558ec8 100644
+--- a/src/agents/session-write-lock.ts
++++ b/src/agents/session-write-lock.ts
+@@ -1,6 +1,7 @@
+ import fsSync from "node:fs";
+ import fs from "node:fs/promises";
+ import path from "node:path";
++import { loadConfig, type OpenClawConfig } from "../config/config.js";
+ import { getProcessStartTime, isPidAlive } from "../shared/pid-alive.js";
+ import { resolveProcessScopedMap } from "../shared/process-scoped-map.js";
+ 
+@@ -45,6 +46,10 @@ const DEFAULT_STALE_MS = 30 * 60 * 1000;
+ const DEFAULT_MAX_HOLD_MS = 5 * 60 * 1000;
+ const DEFAULT_WATCHDOG_INTERVAL_MS = 60_000;
+ const DEFAULT_TIMEOUT_GRACE_MS = 2 * 60 * 1000;
++const DEFAULT_SESSION_LOCK_TIMEOUT_MS = 10_000;
++const DEFAULT_SESSION_LOCK_BACKOFF_BASE_MS = 50;
++const DEFAULT_SESSION_LOCK_BACKOFF_CAP_MS = 1_000;
++const DEFAULT_SESSION_LOCK_BACKOFF_JITTER_MS = 0;
+ const MAX_LOCK_HOLD_MS = 2_147_000_000;
+ 
+ type CleanupState = {
+@@ -53,6 +58,50 @@ type CleanupState = {
+   cleanupHandlers: Map<CleanupSignal, () => void>;
+ };
+ 
++type ResolvedSessionWriteLockConfig = {
++  timeoutMs: number;
++  backoffBaseMs: number;
++  backoffCapMs: number;
++  backoffJitterMs: number;
++};
++
++export function resolveSessionWriteLockConfig(
++  cfg?: Pick<OpenClawConfig, "session"> | undefined,
++): ResolvedSessionWriteLockConfig {
++  const writeLock = cfg?.session?.writeLock;
++  const backoffBaseMs = resolvePositiveMs(
++    writeLock?.backoffBaseMs,
++    DEFAULT_SESSION_LOCK_BACKOFF_BASE_MS,
++  );
++  const backoffCapMs = Math.max(
++    backoffBaseMs,
++    resolvePositiveMs(writeLock?.backoffCapMs, DEFAULT_SESSION_LOCK_BACKOFF_CAP_MS),
++  );
++  const backoffJitterMsRaw = writeLock?.backoffJitterMs;
++  const backoffJitterMs =
++    typeof backoffJitterMsRaw === "number" &&
++    Number.isFinite(backoffJitterMsRaw) &&
++    backoffJitterMsRaw >= 0
++      ? Math.floor(backoffJitterMsRaw)
++      : DEFAULT_SESSION_LOCK_BACKOFF_JITTER_MS;
++  return {
++    timeoutMs: resolvePositiveMs(writeLock?.timeoutMs, DEFAULT_SESSION_LOCK_TIMEOUT_MS, {
++      allowInfinity: true,
++    }),
++    backoffBaseMs,
++    backoffCapMs,
++    backoffJitterMs,
++  };
++}
++
++function readSessionWriteLockConfig(): ResolvedSessionWriteLockConfig {
++  try {
++    return resolveSessionWriteLockConfig(loadConfig());
++  } catch {
++    return resolveSessionWriteLockConfig();
++  }
++}
++
+ type WatchdogState = {
+   started: boolean;
+   intervalMs: number;
+@@ -483,7 +532,10 @@ export async function acquireSessionWriteLock(params: {
+ }> {
+   registerCleanupHandlers();
+   const allowReentrant = params.allowReentrant ?? false;
+-  const timeoutMs = resolvePositiveMs(params.timeoutMs, 10_000, { allowInfinity: true });
++  const configuredLock = readSessionWriteLockConfig();
++  const timeoutMs = resolvePositiveMs(params.timeoutMs, configuredLock.timeoutMs, {
++    allowInfinity: true,
++  });
+   const staleMs = resolvePositiveMs(params.staleMs, DEFAULT_STALE_MS);
+   const maxHoldMs = resolvePositiveMs(params.maxHoldMs, DEFAULT_MAX_HOLD_MS);
+   const sessionFile = path.resolve(params.sessionFile);
+@@ -577,7 +629,12 @@ export async function acquireSessionWriteLock(params: {
+       if (remainingMs <= 0) {
+         break;
+       }
+-      const delay = Math.min(1000, 50 * attempt, remainingMs);
++      const configuredDelay =
++        Math.min(configuredLock.backoffCapMs, configuredLock.backoffBaseMs * attempt) +
++        (configuredLock.backoffJitterMs > 0
++          ? Math.floor(Math.random() * configuredLock.backoffJitterMs)
++          : 0);
++      const delay = Math.min(configuredDelay, remainingMs);
+       await new Promise((r) => setTimeout(r, delay));
+     }
+   }
+diff --git a/src/config/schema.base.generated.ts b/src/config/schema.base.generated.ts
+index 7c06ae911b..fe8aab6488 100644
+--- a/src/config/schema.base.generated.ts
++++ b/src/config/schema.base.generated.ts
+@@ -19671,6 +19671,32 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+             description:
+               "Shared defaults for thread-bound session routing behavior across providers that support thread focus workflows. Configure global defaults here and override per channel only when behavior differs.",
+           },
++          writeLock: {
++            type: "object",
++            properties: {
++              timeoutMs: {
++                type: "integer",
++                exclusiveMinimum: 0,
++                maximum: 9007199254740991,
++              },
++              backoffBaseMs: {
++                type: "integer",
++                exclusiveMinimum: 0,
++                maximum: 9007199254740991,
++              },
++              backoffCapMs: {
++                type: "integer",
++                exclusiveMinimum: 0,
++                maximum: 9007199254740991,
++              },
++              backoffJitterMs: {
++                type: "integer",
++                minimum: 0,
++                maximum: 9007199254740991,
++              },
++            },
++            additionalProperties: false,
++          },
+           maintenance: {
+             type: "object",
+             properties: {
+@@ -26407,6 +26433,31 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+       help: "Optional hard max age in hours for thread-bound sessions across providers/channels (0 disables hard cap). Default: 0.",
+       tags: ["performance", "storage"],
+     },
++    "session.writeLock": {
++      label: "Session Write Lock",
++      help: "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
++      tags: ["storage"],
++    },
++    "session.writeLock.timeoutMs": {
++      label: "Session Write Lock Timeout (ms)",
++      help: "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
++      tags: ["performance", "storage"],
++    },
++    "session.writeLock.backoffBaseMs": {
++      label: "Session Write Lock Backoff Base (ms)",
++      help: "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
++      tags: ["reliability", "storage"],
++    },
++    "session.writeLock.backoffCapMs": {
++      label: "Session Write Lock Backoff Cap (ms)",
++      help: "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
++      tags: ["reliability", "storage"],
++    },
++    "session.writeLock.backoffJitterMs": {
++      label: "Session Write Lock Backoff Jitter (ms)",
++      help: "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
++      tags: ["reliability", "storage"],
++    },
+     "session.maintenance": {
+       label: "Session Maintenance",
+       help: "Automatic session-store maintenance controls for pruning age, entry caps, and file rotation behavior. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
+diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
+index 98358dceb5..f2e397a67a 100644
+--- a/src/config/schema.help.ts
++++ b/src/config/schema.help.ts
+@@ -1353,6 +1353,16 @@ export const FIELD_HELP: Record<string, string> = {
+     "Default inactivity window in hours for thread-bound sessions across providers/channels (0 disables idle auto-unfocus). Default: 24.",
+   "session.threadBindings.maxAgeHours":
+     "Optional hard max age in hours for thread-bound sessions across providers/channels (0 disables hard cap). Default: 0.",
++  "session.writeLock":
++    "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
++  "session.writeLock.timeoutMs":
++    "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
++  "session.writeLock.backoffBaseMs":
++    "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
++  "session.writeLock.backoffCapMs":
++    "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
++  "session.writeLock.backoffJitterMs":
++    "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
+   "session.maintenance":
+     "Automatic session-store maintenance controls for pruning age, entry caps, and file rotation behavior. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
+   "session.maintenance.mode":
+diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
+index 868b615cbf..3c0aacd2b7 100644
+--- a/src/config/schema.labels.ts
++++ b/src/config/schema.labels.ts
+@@ -660,6 +660,11 @@ export const FIELD_LABELS: Record<string, string> = {
+   "session.threadBindings.enabled": "Thread Binding Enabled",
+   "session.threadBindings.idleHours": "Thread Binding Idle Timeout (hours)",
+   "session.threadBindings.maxAgeHours": "Thread Binding Max Age (hours)",
++  "session.writeLock": "Session Write Lock Tuning",
++  "session.writeLock.timeoutMs": "Write Lock Timeout (ms)",
++  "session.writeLock.backoffBaseMs": "Write Lock Backoff Base (ms)",
++  "session.writeLock.backoffCapMs": "Write Lock Backoff Cap (ms)",
++  "session.writeLock.backoffJitterMs": "Write Lock Backoff Jitter (ms)",
+   "session.maintenance": "Session Maintenance",
+   "session.maintenance.mode": "Session Maintenance Mode",
+   "session.maintenance.pruneAfter": "Session Prune After",
+diff --git a/src/config/types.base.ts b/src/config/types.base.ts
+index b76360eccf..9059a47671 100644
+--- a/src/config/types.base.ts
++++ b/src/config/types.base.ts
+@@ -186,6 +186,19 @@ export type SessionConfig = {
+   threadBindings?: SessionThreadBindingsConfig;
+   /** Automatic session store maintenance (pruning, capping, file rotation). */
+   maintenance?: SessionMaintenanceConfig;
++  /** Tuning for the session file write-lock retry behaviour (backoff, timeout, jitter). */
++  writeLock?: SessionWriteLockConfig;
++};
++
++export type SessionWriteLockConfig = {
++  /** Maximum time in milliseconds to wait for the lock to become available. Default: 10000. */
++  timeoutMs?: number;
++  /** Base backoff delay in milliseconds between retry attempts. Default: 50. */
++  backoffBaseMs?: number;
++  /** Maximum backoff delay cap in milliseconds. Default: 1000. */
++  backoffCapMs?: number;
++  /** Extra jitter in milliseconds added to each retry delay. Default: 0. */
++  backoffJitterMs?: number;
+ };
+ 
+ export type SessionMaintenanceMode = "enforce" | "warn";
+diff --git a/src/config/zod-schema.session.ts b/src/config/zod-schema.session.ts
+index 4b01cce585..1cd658cddf 100644
+--- a/src/config/zod-schema.session.ts
++++ b/src/config/zod-schema.session.ts
+@@ -151,6 +151,15 @@ export const SessionSchema = z
+         }
+       })
+       .optional(),
++    writeLock: z
++      .object({
++        timeoutMs: z.number().int().positive().optional(),
++        backoffBaseMs: z.number().int().positive().optional(),
++        backoffCapMs: z.number().int().positive().optional(),
++        backoffJitterMs: z.number().int().min(0).optional(),
++      })
++      .strict()
++      .optional(),
+   })
+   .strict()
+   .optional();
+-- 
+2.53.0
+

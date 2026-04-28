@@ -1,0 +1,261 @@
+From 185b62b7dd465663217bd9e352ac8b2ccc0dbf7c Mon Sep 17 00:00:00 2001
+From: Artur Bodera <abodera@gmail.com>
+Date: Wed, 8 Apr 2026 14:48:15 +1000
+Subject: [PATCH] config(subagents): make spawn self-call timeout configurable
+
+---
+ ...nts.sessions-spawn-gateway-timeout.test.ts | 47 +++++++++++++++++++
+ src/agents/subagent-spawn.ts                  | 31 +++++++++---
+ .../config.agent-concurrency-defaults.test.ts |  2 +
+ src/config/types.agent-defaults.ts            |  5 ++
+ src/config/zod-schema.agent-defaults.ts       |  8 ++++
+ 5 files changed, 86 insertions(+), 7 deletions(-)
+ create mode 100644 src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts
+
+diff --git a/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts b/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts
+new file mode 100644
+index 0000000000..0683e0b9af
+--- /dev/null
++++ b/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts
+@@ -0,0 +1,47 @@
++import { beforeEach, describe, expect, it } from "vitest";
++import "./test-helpers/fast-core-tools.js";
++import * as sessionsHarness from "./openclaw-tools.subagents.sessions-spawn.test-harness.js";
++import { resetSubagentRegistryForTests } from "./subagent-registry.js";
++
++const MAIN_SESSION_KEY = "agent:test:main";
++
++function applySubagentGatewayTimeoutDefault(timeoutMs: number) {
++  sessionsHarness.setSessionsSpawnConfigOverride({
++    session: { mainKey: "main", scope: "per-sender" },
++    agents: { defaults: { subagents: { gatewayTimeoutMs: timeoutMs } } },
++  });
++}
++
++function getGatewayCallTimeouts(
++  calls: Array<{ method?: string; timeoutMs?: number }>,
++  method: string,
++): number[] {
++  return calls
++    .filter((call) => call.method === method)
++    .map((call) => call.timeoutMs)
++    .filter((timeoutMs): timeoutMs is number => typeof timeoutMs === "number");
++}
++
++async function spawnSubagent(callId: string, payload: Record<string, unknown>) {
++  const tool = await sessionsHarness.getSessionsSpawnTool({ agentSessionKey: MAIN_SESSION_KEY });
++  const result = await tool.execute(callId, payload);
++  expect(result.details).toMatchObject({ status: "accepted" });
++}
++
++describe("sessions_spawn internal gateway timeout defaults", () => {
++  beforeEach(() => {
++    sessionsHarness.resetSessionsSpawnConfigOverride();
++    resetSubagentRegistryForTests();
++    sessionsHarness.getCallGatewayMock().mockClear();
++  });
++
++  it("uses configured gatewayTimeoutMs for internal sessions.patch and agent calls", async () => {
++    applySubagentGatewayTimeoutDefault(30_000);
++    const gateway = sessionsHarness.setupSessionsSpawnGatewayMock({});
++
++    await spawnSubagent("call-timeout", { task: "hello" });
++
++    expect(getGatewayCallTimeouts(gateway.calls, "sessions.patch")).toEqual([30_000, 30_000]);
++    expect(getGatewayCallTimeouts(gateway.calls, "agent")).toEqual([30_000]);
++  });
++});
+diff --git a/src/agents/subagent-spawn.ts b/src/agents/subagent-spawn.ts
+index 8a45070639..139e1c4509 100644
+--- a/src/agents/subagent-spawn.ts
++++ b/src/agents/subagent-spawn.ts
+@@ -116,6 +116,9 @@ export type SpawnSubagentContext = {
+   workspaceDir?: string;
+ };
+ 
++const DEFAULT_SUBAGENT_GATEWAY_TIMEOUT_MS = 10_000;
++const MAX_TIMER_SAFE_TIMEOUT_MS = 2_147_000_000;
++
+ export type SpawnSubagentResult = {
+   status: "accepted" | "forbidden" | "error";
+   childSessionKey?: string;
+@@ -225,6 +228,7 @@ async function cleanupProvisionalSession(
+   options?: {
+     emitLifecycleHooks?: boolean;
+     deleteTranscript?: boolean;
++    gatewayTimeoutMs?: number;
+   },
+ ): Promise<void> {
+   try {
+@@ -235,7 +239,7 @@ async function cleanupProvisionalSession(
+         emitLifecycleHooks: options?.emitLifecycleHooks === true,
+         deleteTranscript: options?.deleteTranscript === true,
+       },
+-      timeoutMs: 10_000,
++      timeoutMs: options?.gatewayTimeoutMs ?? DEFAULT_SUBAGENT_GATEWAY_TIMEOUT_MS,
+     });
+   } catch {
+     // Best-effort cleanup only.
+@@ -247,6 +251,7 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
+   attachmentAbsDir?: string;
+   emitLifecycleHooks?: boolean;
+   deleteTranscript?: boolean;
++  gatewayTimeoutMs?: number;
+ }): Promise<void> {
+   if (params.attachmentAbsDir) {
+     try {
+@@ -258,9 +263,18 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
+   await cleanupProvisionalSession(params.childSessionKey, {
+     emitLifecycleHooks: params.emitLifecycleHooks,
+     deleteTranscript: params.deleteTranscript,
++    gatewayTimeoutMs: params.gatewayTimeoutMs,
+   });
+ }
+ 
++export function resolveSubagentGatewayTimeoutMs(cfg: ReturnType<typeof loadConfig>): number {
++  const configured = cfg.agents?.defaults?.subagents?.gatewayTimeoutMs;
++  if (typeof configured !== "number" || !Number.isFinite(configured)) {
++    return DEFAULT_SUBAGENT_GATEWAY_TIMEOUT_MS;
++  }
++  return Math.min(Math.max(1, Math.floor(configured)), MAX_TIMER_SAFE_TIMEOUT_MS);
++}
++
+ function resolveSpawnMode(params: {
+   requestedMode?: SpawnSubagentMode;
+   threadRequested: boolean;
+@@ -398,6 +412,7 @@ export async function spawnSubagentDirect(
+     cfg,
+     runTimeoutSeconds: params.runTimeoutSeconds,
+   });
++  const subagentGatewayTimeoutMs = resolveSubagentGatewayTimeoutMs(cfg);
+   let modelApplied = false;
+   let threadBindingReady = false;
+   const { mainKey, alias } = resolveMainSessionAlias(cfg);
+@@ -518,7 +533,7 @@ export async function spawnSubagentDirect(
+       await callSubagentGateway({
+         method: "sessions.patch",
+         params: { key: childSessionKey, ...patch },
+-        timeoutMs: 10_000,
++        timeoutMs: subagentGatewayTimeoutMs,
+       });
+       return undefined;
+     } catch (err) {
+@@ -552,7 +567,7 @@ export async function spawnSubagentDirect(
+         await callSubagentGateway({
+           method: "sessions.delete",
+           params: { key: childSessionKey, emitLifecycleHooks: false },
+-          timeoutMs: 10_000,
++          timeoutMs: subagentGatewayTimeoutMs,
+         });
+       } catch {
+         // Best-effort cleanup only.
+@@ -585,7 +600,7 @@ export async function spawnSubagentDirect(
+         await callSubagentGateway({
+           method: "sessions.delete",
+           params: { key: childSessionKey, emitLifecycleHooks: false },
+-          timeoutMs: 10_000,
++          timeoutMs: subagentGatewayTimeoutMs,
+         });
+       } catch {
+         // Best-effort cleanup only.
+@@ -632,6 +647,7 @@ export async function spawnSubagentDirect(
+     await cleanupProvisionalSession(childSessionKey, {
+       emitLifecycleHooks: threadBindingReady,
+       deleteTranscript: true,
++      gatewayTimeoutMs: subagentGatewayTimeoutMs,
+     });
+     return {
+       status: materializedAttachments.status,
+@@ -688,6 +704,7 @@ export async function spawnSubagentDirect(
+       attachmentAbsDir,
+       emitLifecycleHooks: threadBindingReady,
+       deleteTranscript: true,
++      gatewayTimeoutMs: subagentGatewayTimeoutMs,
+     });
+     return {
+       status: "error",
+@@ -728,7 +745,7 @@ export async function spawnSubagentDirect(
+           : {}),
+         ...publicSpawnedMetadata,
+       },
+-      timeoutMs: 10_000,
++      timeoutMs: subagentGatewayTimeoutMs,
+     });
+     const runId = readGatewayRunId(response);
+     if (runId) {
+@@ -782,7 +799,7 @@ export async function spawnSubagentDirect(
+           deleteTranscript: true,
+           emitLifecycleHooks,
+         },
+-        timeoutMs: 10_000,
++        timeoutMs: subagentGatewayTimeoutMs,
+       });
+     } catch {
+       // Best-effort only.
+@@ -832,7 +849,7 @@ export async function spawnSubagentDirect(
+           deleteTranscript: true,
+           emitLifecycleHooks: threadBindingReady,
+         },
+-        timeoutMs: 10_000,
++        timeoutMs: subagentGatewayTimeoutMs,
+       });
+     } catch {
+       // Best-effort cleanup only.
+diff --git a/src/config/config.agent-concurrency-defaults.test.ts b/src/config/config.agent-concurrency-defaults.test.ts
+index f5bda63b0e..0b019a2560 100644
+--- a/src/config/config.agent-concurrency-defaults.test.ts
++++ b/src/config/config.agent-concurrency-defaults.test.ts
+@@ -34,6 +34,7 @@ describe("agent concurrency defaults", () => {
+           subagents: {
+             maxSpawnDepth: 2,
+             maxChildrenPerAgent: 7,
++            gatewayTimeoutMs: 25_000,
+           },
+         },
+       },
+@@ -41,6 +42,7 @@ describe("agent concurrency defaults", () => {
+ 
+     expect(parsed.agents?.defaults?.subagents?.maxSpawnDepth).toBe(2);
+     expect(parsed.agents?.defaults?.subagents?.maxChildrenPerAgent).toBe(7);
++    expect(parsed.agents?.defaults?.subagents?.gatewayTimeoutMs).toBe(25_000);
+   });
+ 
+   it("injects missing agent defaults", () => {
+diff --git a/src/config/types.agent-defaults.ts b/src/config/types.agent-defaults.ts
+index a748ef9f7e..8670365019 100644
+--- a/src/config/types.agent-defaults.ts
++++ b/src/config/types.agent-defaults.ts
+@@ -343,6 +343,11 @@ export type AgentDefaultsConfig = {
+     thinking?: string;
+     /** Default run timeout in seconds for spawned sub-agents (0 = no timeout). */
+     runTimeoutSeconds?: number;
++    /**
++     * Internal gateway timeout in milliseconds for sub-agent spawn self-calls
++     * (sessions.patch / agent / sessions.delete). Default: 10000.
++     */
++    gatewayTimeoutMs?: number;
+     /** Gateway timeout in ms for sub-agent announce delivery calls (default: 90000). */
+     announceTimeoutMs?: number;
+     /** Require explicit agentId in sessions_spawn (no default same-as-caller). Default: false. */
+diff --git a/src/config/zod-schema.agent-defaults.ts b/src/config/zod-schema.agent-defaults.ts
+index 78f0fe07c8..8fd3595528 100644
+--- a/src/config/zod-schema.agent-defaults.ts
++++ b/src/config/zod-schema.agent-defaults.ts
+@@ -217,6 +217,14 @@ export const AgentDefaultsSchema = z
+         model: AgentModelSchema.optional(),
+         thinking: z.string().optional(),
+         runTimeoutSeconds: z.number().int().min(0).optional(),
++        gatewayTimeoutMs: z
++          .number()
++          .int()
++          .positive()
++          .optional()
++          .describe(
++            "Internal gateway timeout in milliseconds for sub-agent spawn self-calls such as sessions.patch, agent, and sessions.delete (default: 10000). Increase on slower gateways or remote filesystems that delay child acceptance.",
++          ),
+         announceTimeoutMs: z.number().int().positive().optional(),
+         requireAgentId: z.boolean().optional(),
+       })
+-- 
+2.53.0
+

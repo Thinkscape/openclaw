@@ -1,0 +1,902 @@
+From fba6a17ccb7ef4d34bd7151f3f4ecffbc7fc0159 Mon Sep 17 00:00:00 2001
+From: Artur Bodera <abodera@gmail.com>
+Date: Wed, 22 Apr 2026 11:39:54 +1000
+Subject: [PATCH] feat(skills): add runtime prompt path aliases
+
+---
+ docs/gateway/configuration-reference.md       |  11 ++
+ docs/tools/skills-config.md                   |  42 +++++
+ docs/tools/skills.md                          |   5 +
+ src/agents/agent-command.ts                   |   1 +
+ src/agents/pi-embedded-runner/compact.ts      |   1 +
+ src/agents/pi-embedded-runner/run/attempt.ts  |   1 +
+ ...skills.buildworkspaceskillsnapshot.test.ts |  45 +++++
+ .../skills.resolveskillspromptforrun.test.ts  |  36 ++++
+ src/agents/skills/workspace.ts                | 142 ++++++++++++++-
+ .../reply/commands-system-prompt.ts           |   1 +
+ src/auto-reply/reply/session-updates.ts       |   1 +
+ .../config.skills-entries-config.test.ts      |  18 ++
+ src/config/schema.base.generated.ts           | 166 ++++++++++++++----
+ src/config/schema.help.ts                     |   8 +
+ src/config/schema.labels.ts                   |   4 +
+ src/config/types.skills.ts                    |  13 ++
+ src/config/zod-schema.ts                      |  11 ++
+ src/cron/isolated-agent/run.ts                |   1 +
+ src/cron/isolated-agent/skills-snapshot.ts    |   2 +
+ 19 files changed, 476 insertions(+), 33 deletions(-)
+
+diff --git a/docs/gateway/configuration-reference.md b/docs/gateway/configuration-reference.md
+index a05e387134..4abc0fcf3a 100644
+--- a/docs/gateway/configuration-reference.md
++++ b/docs/gateway/configuration-reference.md
+@@ -2855,6 +2855,13 @@ See [Local Models](/gateway/local-models). TL;DR: run a large local model via LM
+   skills: {
+     allowBundled: ["gemini", "peekaboo"],
+     load: {
++      promptPathAliases: [
++        {
++          from: "/home/node/.openclaw/shared/skills",
++          to: "/shared/skills",
++          when: "sandbox",
++        },
++      ],
+       extraDirs: ["~/Projects/agent-scripts/skills"],
+     },
+     install: {
+@@ -2875,6 +2882,10 @@ See [Local Models](/gateway/local-models). TL;DR: run a large local model via LM
+ 
+ - `allowBundled`: optional allowlist for bundled skills only (managed/workspace skills unaffected).
+ - `load.extraDirs`: extra shared skill roots (lowest precedence).
++- `load.promptPathAliases`: optional prompt-facing path rewrites for discovered skill locations.
++- `load.promptPathAliases[].from`: source path prefix to match against canonical skill locations.
++- `load.promptPathAliases[].to`: replacement path prefix shown to agents in the skills prompt.
++- `load.promptPathAliases[].when`: apply the alias in all runs or only sandboxed runs (`always` or `sandbox`).
+ - `install.preferBrew`: when true, prefer Homebrew installers when `brew` is
+   available before falling back to other installer kinds.
+ - `install.nodeManager`: node installer preference for `metadata.openclaw.install`
+diff --git a/docs/tools/skills-config.md b/docs/tools/skills-config.md
+index ddf84ac5b2..2894cdf4f3 100644
+--- a/docs/tools/skills-config.md
++++ b/docs/tools/skills-config.md
+@@ -17,6 +17,13 @@ Most skills loader/install configuration lives under `skills` in
+   skills: {
+     allowBundled: ["gemini", "peekaboo"],
+     load: {
++      promptPathAliases: [
++        {
++          from: "/home/node/.openclaw/shared/skills",
++          to: "/shared/skills",
++          when: "sandbox",
++        },
++      ],
+       extraDirs: ["~/Projects/agent-scripts/skills", "~/Projects/oss/some-skill-pack/skills"],
+       watch: true,
+       watchDebounceMs: 250,
+@@ -88,6 +95,16 @@ Rules:
+   `<workspace>/.agents/skills`, and `<workspace>/skills`.
+ - `allowBundled`: optional allowlist for **bundled** skills only. When set, only
+   bundled skills in the list are eligible (managed, agent, and workspace skills unaffected).
++- `load.promptPathAliases`: optional prompt-facing path rewrites for discovered
++  skill locations. Use this when a skill is loaded from a host/gateway path but
++  must be read through a different runtime-visible path, such as `/shared/skills`
++  inside a sandbox.
++- `load.promptPathAliases[].from`: source path prefix to match against the canonical
++  discovered `SKILL.md` path.
++- `load.promptPathAliases[].to`: replacement path prefix shown to the agent in
++  the skills prompt.
++- `load.promptPathAliases[].when`: apply the alias in all runs or only sandboxed
++  runs (`always` or `sandbox`, default: `always`).
+ - `load.extraDirs`: additional skill directories to scan (lowest precedence).
+ - `load.watch`: watch skill folders and refresh the skills snapshot (default: true).
+ - `load.watchDebounceMs`: debounce for skill watcher events in milliseconds (default: 250).
+@@ -120,6 +137,31 @@ Per-skill fields:
+   `skills.load.extraDirs`.
+ - Changes to skills are picked up on the next agent turn when the watcher is enabled.
+ 
++### Shared skills mounted into sandboxes
++
++If you load shared skills from a gateway-local path but expose them inside the
++sandbox through a bind mount, configure both:
++
++```json5
++{
++  skills: {
++    load: {
++      extraDirs: ["/home/node/.openclaw/shared/skills"],
++      promptPathAliases: [
++        {
++          from: "/home/node/.openclaw/shared/skills",
++          to: "/shared/skills",
++          when: "sandbox",
++        },
++      ],
++    },
++  },
++}
++```
++
++This keeps skill discovery on the gateway path while advertising a
++readable-in-sandbox `<location>` path to the agent.
++
+ ### Sandboxed skills + env vars
+ 
+ When a session is **sandboxed**, skill processes run inside the configured
+diff --git a/docs/tools/skills.md b/docs/tools/skills.md
+index 4e979cdfe0..bb5120e4d2 100644
+--- a/docs/tools/skills.md
++++ b/docs/tools/skills.md
+@@ -39,6 +39,11 @@ In **multi-agent** setups, each agent has its own workspace. That means:
+ - **Shared folders** can also be added via `skills.load.extraDirs` (lowest
+   precedence) if you want a common skills pack used by multiple agents.
+ 
++If those shared folders are loaded from a gateway-only path but exposed inside a
++sandbox through a bind mount, add `skills.load.promptPathAliases` so the agent
++sees a readable `<location>` such as `/shared/skills/...` instead of the
++gateway-local source path.
++
+ If the same skill name exists in more than one place, the usual precedence
+ applies: workspace wins, then project agent skills, then personal agent skills,
+ then managed/local, then bundled, then extra dirs.
+diff --git a/src/agents/agent-command.ts b/src/agents/agent-command.ts
+index b96a210e98..3ba19d060f 100644
+--- a/src/agents/agent-command.ts
++++ b/src/agents/agent-command.ts
+@@ -604,6 +604,7 @@ async function agentCommandInternal(
+               }),
+             },
+             snapshotVersion: skillsSnapshotVersion,
++            sessionKey,
+             skillFilter,
+             agentId: sessionAgentId,
+           });
+diff --git a/src/agents/pi-embedded-runner/compact.ts b/src/agents/pi-embedded-runner/compact.ts
+index 701139f89a..8a9557eded 100644
+--- a/src/agents/pi-embedded-runner/compact.ts
++++ b/src/agents/pi-embedded-runner/compact.ts
+@@ -459,6 +459,7 @@ export async function compactEmbeddedPiSessionDirect(
+       skillsSnapshot: params.skillsSnapshot,
+       entries: shouldLoadSkillEntries ? skillEntries : undefined,
+       config: params.config,
++      sessionKey: params.sessionKey,
+       workspaceDir: effectiveWorkspace,
+       agentId: effectiveSkillAgentId,
+     });
+diff --git a/src/agents/pi-embedded-runner/run/attempt.ts b/src/agents/pi-embedded-runner/run/attempt.ts
+index b5adfbe163..fecd773bc2 100644
+--- a/src/agents/pi-embedded-runner/run/attempt.ts
++++ b/src/agents/pi-embedded-runner/run/attempt.ts
+@@ -487,6 +487,7 @@ export async function runEmbeddedAttempt(
+       skillsSnapshot: params.skillsSnapshot,
+       entries: shouldLoadSkillEntries ? skillEntries : undefined,
+       config: params.config,
++      sessionKey: params.sessionKey,
+       workspaceDir: effectiveWorkspace,
+       agentId: sessionAgentId,
+     });
+diff --git a/src/agents/skills.buildworkspaceskillsnapshot.test.ts b/src/agents/skills.buildworkspaceskillsnapshot.test.ts
+index e1174952e6..e3ea70fdbc 100644
+--- a/src/agents/skills.buildworkspaceskillsnapshot.test.ts
++++ b/src/agents/skills.buildworkspaceskillsnapshot.test.ts
+@@ -252,6 +252,51 @@ describe("buildWorkspaceSkillSnapshot", () => {
+     expect(snapshot.prompt).not.toContain("repo-skill-07");
+   });
+ 
++  it("rewrites prompt-facing extra-dir skill paths for sandboxed sessions", async () => {
++    const workspaceDir = await fixtureSuite.createCaseDir("workspace");
++    const sharedSkillsDir = path.join(workspaceDir, "shared-skills");
++    const skillDir = path.join(sharedSkillsDir, "docker-deploy");
++
++    await writeSkill({
++      dir: skillDir,
++      name: "docker-deploy",
++      description: "Deploy with Docker",
++      body: "# Docker Deploy\n",
++    });
++
++    const snapshot = withWorkspaceHome(workspaceDir, () =>
++      buildWorkspaceSkillSnapshot(workspaceDir, {
++        config: {
++          agents: {
++            defaults: {
++              sandbox: {
++                mode: "all",
++              },
++            },
++          },
++          skills: {
++            load: {
++              extraDirs: [sharedSkillsDir],
++              promptPathAliases: [
++                {
++                  from: sharedSkillsDir,
++                  to: "/shared/skills",
++                  when: "sandbox",
++                },
++              ],
++            },
++          },
++        },
++        managedSkillsDir: path.join(workspaceDir, ".managed"),
++        bundledSkillsDir: path.join(workspaceDir, ".bundled"),
++        sessionKey: "agent:main",
++      }),
++    );
++
++    expect(snapshot.prompt).toContain("/shared/skills/docker-deploy/SKILL.md");
++    expect(snapshot.prompt).not.toContain(path.join(skillDir, "SKILL.md"));
++  });
++
+   it("skips skills whose SKILL.md exceeds maxSkillFileBytes", async () => {
+     const workspaceDir = await fixtureSuite.createCaseDir("workspace");
+ 
+diff --git a/src/agents/skills.resolveskillspromptforrun.test.ts b/src/agents/skills.resolveskillspromptforrun.test.ts
+index e7a5c70e83..c7f697faa3 100644
+--- a/src/agents/skills.resolveskillspromptforrun.test.ts
++++ b/src/agents/skills.resolveskillspromptforrun.test.ts
+@@ -11,6 +11,42 @@ describe("resolveSkillsPromptForRun", () => {
+     });
+     expect(prompt).toBe("SNAPSHOT");
+   });
++
++  it("rewrites snapshot prompt locations when a sandbox path alias applies", () => {
++    const prompt = resolveSkillsPromptForRun({
++      skillsSnapshot: {
++        prompt:
++          "<available_skills>\n  <skill>\n    <location>/home/node/.openclaw/shared/skills/docker-deploy/SKILL.md</location>\n  </skill>\n</available_skills>",
++        skills: [],
++      },
++      config: {
++        agents: {
++          defaults: {
++            sandbox: {
++              mode: "all",
++            },
++          },
++        },
++        skills: {
++          load: {
++            promptPathAliases: [
++              {
++                from: "/home/node/.openclaw/shared/skills",
++                to: "/shared/skills",
++                when: "sandbox",
++              },
++            ],
++          },
++        },
++      },
++      sessionKey: "agent:main",
++      workspaceDir: "/tmp/openclaw",
++    });
++
++    expect(prompt).toContain("/shared/skills/docker-deploy/SKILL.md");
++    expect(prompt).not.toContain("/home/node/.openclaw/shared/skills/docker-deploy/SKILL.md");
++  });
++
+   it("builds prompt from entries when snapshot is missing", () => {
+     const entry: SkillEntry = {
+       skill: createFixtureSkill({
+diff --git a/src/agents/skills/workspace.ts b/src/agents/skills/workspace.ts
+index 496131452b..d6049e728c 100644
+--- a/src/agents/skills/workspace.ts
++++ b/src/agents/skills/workspace.ts
+@@ -8,6 +8,7 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
+ import { normalizeOptionalString } from "../../shared/string-coerce.js";
+ import { CONFIG_DIR, resolveHomeDir, resolveUserPath } from "../../utils.js";
+ import { resolveSandboxPath } from "../sandbox-paths.js";
++import { resolveSandboxRuntimeStatus } from "../sandbox/runtime-status.js";
+ import {
+   resolveEffectiveAgentSkillFilter,
+   resolveEffectiveAgentSkillsLimits,
+@@ -30,6 +31,11 @@ import type {
+ const fsp = fs.promises;
+ const skillsLogger = createSubsystemLogger("skills");
+ 
++type ActiveSkillPromptPathAlias = {
++  from: string;
++  to: string;
++};
++
+ /**
+  * Replace the user's home directory prefix with `~` in skill file paths
+  * to reduce system prompt token usage. Models understand `~` expansion,
+@@ -88,6 +94,125 @@ function compactPathForConsoleMessage(filePath: string): string {
+   return compactHomePath(filePath, resolveCompactHomePrefixes());
+ }
+ 
++function resolveActiveSkillPromptPathAliases(params: {
++  config?: OpenClawConfig;
++  sessionKey?: string;
++}): ActiveSkillPromptPathAlias[] {
++  const aliasesRaw = params.config?.skills?.load?.promptPathAliases ?? [];
++  const sandboxed = params.sessionKey
++    ? resolveSandboxRuntimeStatus({
++        cfg: params.config,
++        sessionKey: params.sessionKey,
++      }).sandboxed
++    : false;
++
++  return aliasesRaw
++    .flatMap((alias) => {
++      const from = typeof alias?.from === "string" ? alias.from.trim() : "";
++      const to = typeof alias?.to === "string" ? alias.to.trim() : "";
++      if (!from || !to) {
++        return [];
++      }
++      const when = alias.when ?? "always";
++      if (when === "sandbox" && !sandboxed) {
++        return [];
++      }
++      return [
++        {
++          from: resolveUserPath(from),
++          to: normalizePromptPathPrefix(to),
++        },
++      ];
++    })
++    .toSorted((a, b) => b.from.length - a.from.length);
++}
++
++function normalizePromptPathPrefix(input: string): string {
++  const trimmed = input.trim();
++  if (!trimmed) {
++    return "";
++  }
++  if (trimmed === "/" || trimmed === "\\") {
++    return trimmed[0];
++  }
++  return trimmed.replace(/[\\/]+$/, "");
++}
++
++function isWindowsPromptPath(input: string): boolean {
++  return /^[A-Za-z]:[\\/]/.test(input) || input.startsWith("\\\\");
++}
++
++function joinPromptPath(prefix: string, relativePath: string): string {
++  if (!relativePath) {
++    return prefix;
++  }
++  const segments = relativePath.split(path.sep).filter(Boolean);
++  if (segments.length === 0) {
++    return prefix;
++  }
++  if (isWindowsPromptPath(prefix)) {
++    return path.win32.join(prefix, ...segments);
++  }
++  const normalizedPrefix = prefix.replace(/\\/g, "/");
++  return path.posix.join(normalizedPrefix, ...segments);
++}
++
++function rewriteSkillPathForPrompt(
++  filePath: string,
++  aliases: ActiveSkillPromptPathAlias[],
++): string {
++  for (const alias of aliases) {
++    const relative = path.relative(alias.from, filePath);
++    if (!relative) {
++      return alias.to;
++    }
++    if (relative.startsWith("..") || path.isAbsolute(relative)) {
++      continue;
++    }
++    return joinPromptPath(alias.to, relative);
++  }
++  return filePath;
++}
++
++function applySkillPromptPathAliases(
++  skills: Skill[],
++  aliases: ActiveSkillPromptPathAlias[],
++): Skill[] {
++  if (aliases.length === 0) {
++    return skills;
++  }
++  return skills.map((skill) => ({
++    ...skill,
++    filePath: rewriteSkillPathForPrompt(skill.filePath, aliases),
++  }));
++}
++
++function unescapeXml(input: string): string {
++  return input
++    .replace(/&lt;/g, "<")
++    .replace(/&gt;/g, ">")
++    .replace(/&quot;/g, '"')
++    .replace(/&apos;/g, "'")
++    .replace(/&amp;/g, "&");
++}
++
++function rewriteSkillsPromptLocations(
++  prompt: string,
++  aliases: ActiveSkillPromptPathAlias[],
++): string {
++  if (!prompt.trim() || aliases.length === 0) {
++    return prompt;
++  }
++  return prompt.replace(/<location>([^<]+)<\/location>/g, (match, encodedPath: string) => {
++    const decodedPath = unescapeXml(encodedPath);
++    const rewrittenPath = rewriteSkillPathForPrompt(decodedPath, aliases);
++    if (rewrittenPath === decodedPath) {
++      return match;
++    }
++    return `<location>${escapeXml(rewrittenPath)}</location>`;
++  });
++}
++
+ function isSkillVisibleInAvailableSkillsPrompt(entry: SkillEntry): boolean {
+   if (entry.exposure) {
+     return entry.exposure.includeInAvailableSkillsPrompt !== false;
+@@ -748,6 +873,7 @@ type WorkspaceSkillBuildOptions = {
+   bundledSkillsDir?: string;
+   entries?: SkillEntry[];
+   agentId?: string;
++  sessionKey?: string;
+   /** If provided, only include skills with these names */
+   skillFilter?: string[];
+   eligibility?: SkillEligibilityContext;
+@@ -784,11 +910,17 @@ function resolveWorkspaceSkillPromptState(
+   const promptEntries = eligible.filter((entry) => isSkillVisibleInAvailableSkillsPrompt(entry));
+   const remoteNote = opts?.eligibility?.remote?.note?.trim();
+   const resolvedSkills = promptEntries.map((entry) => entry.skill);
++  const promptPathAliases = resolveActiveSkillPromptPathAliases({
++    config: opts?.config,
++    sessionKey: opts?.sessionKey,
++  });
+   // Derive prompt-facing skills with compacted paths (e.g. ~/...) once.
+   // Budget checks and final render both use this same representation so the
+   // tier decision is based on the exact strings that end up in the prompt.
+   // resolvedSkills keeps canonical paths for snapshot / runtime consumers.
+-  const promptSkills = compactSkillPaths(resolvedSkills)
++  const promptSkills = compactSkillPaths(
++    applySkillPromptPathAliases(resolvedSkills, promptPathAliases),
++  )
+     .slice()
+     .sort((a, b) => a.name.localeCompare(b.name, "en"));
+   const { skillsForPrompt, truncated, compact } = applySkillsPromptLimits({
+@@ -817,16 +949,22 @@ export function resolveSkillsPromptForRun(params: {
+   config?: OpenClawConfig;
+   workspaceDir: string;
+   agentId?: string;
++  sessionKey?: string;
+ }): string {
++  const promptPathAliases = resolveActiveSkillPromptPathAliases({
++    config: params.config,
++    sessionKey: params.sessionKey,
++  });
+   const snapshotPrompt = params.skillsSnapshot?.prompt?.trim();
+   if (snapshotPrompt) {
+-    return snapshotPrompt;
++    return rewriteSkillsPromptLocations(snapshotPrompt, promptPathAliases);
+   }
+   if (params.entries && params.entries.length > 0) {
+     const prompt = buildWorkspaceSkillsPrompt(params.workspaceDir, {
+       entries: params.entries,
+       config: params.config,
+       agentId: params.agentId,
++      sessionKey: params.sessionKey,
+     });
+     return prompt.trim() ? prompt : "";
+   }
+diff --git a/src/auto-reply/reply/commands-system-prompt.ts b/src/auto-reply/reply/commands-system-prompt.ts
+index 2ca45e3c95..c8cc6a4a34 100644
+--- a/src/auto-reply/reply/commands-system-prompt.ts
++++ b/src/auto-reply/reply/commands-system-prompt.ts
+@@ -71,6 +71,7 @@ export async function resolveCommandsSystemPromptBundle(
+           }),
+         },
+         snapshotVersion: getSkillsSnapshotVersion(workspaceDir),
++        sessionKey: params.ctx.SessionKey ?? params.sessionKey,
+       });
+     } catch {
+       return { prompt: "", skills: [], resolvedSkills: [] };
+diff --git a/src/auto-reply/reply/session-updates.ts b/src/auto-reply/reply/session-updates.ts
+index 80361a800f..f3fccac35c 100644
+--- a/src/auto-reply/reply/session-updates.ts
++++ b/src/auto-reply/reply/session-updates.ts
+@@ -155,6 +155,7 @@ export async function ensureSkillSnapshot(params: {
+       skillFilter,
+       eligibility: { remote: remoteEligibility },
+       snapshotVersion,
++      sessionKey,
+     });
+ 
+   if (isFirstTurnInSession && sessionStore && sessionKey) {
+diff --git a/src/config/config.skills-entries-config.test.ts b/src/config/config.skills-entries-config.test.ts
+index 4ce0e39046..402a8dfbb2 100644
+--- a/src/config/config.skills-entries-config.test.ts
++++ b/src/config/config.skills-entries-config.test.ts
+@@ -20,6 +20,24 @@ describe("skills entries config schema", () => {
+     expect(res.success).toBe(true);
+   });
+ 
++  it("accepts promptPathAliases under skills.load", () => {
++    const res = OpenClawSchema.safeParse({
++      skills: {
++        load: {
++          promptPathAliases: [
++            {
++              from: "/home/node/.openclaw/shared/skills",
++              to: "/shared/skills",
++              when: "sandbox",
++            },
++          ],
++        },
++      },
++    });
++
++    expect(res.success).toBe(true);
++  });
++
+   it("rejects unknown top-level fields", () => {
+     const res = OpenClawSchema.safeParse({
+       skills: {
+diff --git a/src/config/schema.base.generated.ts b/src/config/schema.base.generated.ts
+index fe8aab6488..4232578923 100644
+--- a/src/config/schema.base.generated.ts
++++ b/src/config/schema.base.generated.ts
+@@ -5181,6 +5181,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+                     minimum: 0,
+                     maximum: 9007199254740991,
+                   },
++                  gatewayTimeoutMs: {
++                    description:
++                      "Internal gateway timeout in milliseconds for sub-agent spawn self-calls such as sessions.patch, agent, and sessions.delete (default: 10000). Increase on slower gateways or remote filesystems that delay child acceptance.",
++                    type: "integer",
++                    exclusiveMinimum: 0,
++                    maximum: 9007199254740991,
++                  },
+                   announceTimeoutMs: {
+                     type: "integer",
+                     exclusiveMinimum: 0,
+@@ -5402,6 +5409,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+                         description:
+                           "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
+                       },
++                      dangerouslyDisableNoNewPrivileges: {
++                        type: "boolean",
++                        title: "Sandbox Docker Disable No New Privileges",
++                        description:
++                          "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
++                      },
+                     },
+                     additionalProperties: false,
+                   },
+@@ -6736,6 +6749,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+                           description:
+                             "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
+                         },
++                        dangerouslyDisableNoNewPrivileges: {
++                          type: "boolean",
++                          title: "Agent Sandbox Docker Disable No New Privileges",
++                          description:
++                            "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
++                        },
+                       },
+                       additionalProperties: false,
+                     },
+@@ -19671,32 +19690,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+             description:
+               "Shared defaults for thread-bound session routing behavior across providers that support thread focus workflows. Configure global defaults here and override per channel only when behavior differs.",
+           },
+-          writeLock: {
+-            type: "object",
+-            properties: {
+-              timeoutMs: {
+-                type: "integer",
+-                exclusiveMinimum: 0,
+-                maximum: 9007199254740991,
+-              },
+-              backoffBaseMs: {
+-                type: "integer",
+-                exclusiveMinimum: 0,
+-                maximum: 9007199254740991,
+-              },
+-              backoffCapMs: {
+-                type: "integer",
+-                exclusiveMinimum: 0,
+-                maximum: 9007199254740991,
+-              },
+-              backoffJitterMs: {
+-                type: "integer",
+-                minimum: 0,
+-                maximum: 9007199254740991,
+-              },
+-            },
+-            additionalProperties: false,
+-          },
+           maintenance: {
+             type: "object",
+             properties: {
+@@ -19798,6 +19791,47 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+             description:
+               "Automatic session-store maintenance controls for pruning age, entry caps, and file rotation behavior. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
+           },
++          writeLock: {
++            type: "object",
++            properties: {
++              timeoutMs: {
++                type: "integer",
++                exclusiveMinimum: 0,
++                maximum: 9007199254740991,
++                title: "Write Lock Timeout (ms)",
++                description:
++                  "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
++              },
++              backoffBaseMs: {
++                type: "integer",
++                exclusiveMinimum: 0,
++                maximum: 9007199254740991,
++                title: "Write Lock Backoff Base (ms)",
++                description:
++                  "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
++              },
++              backoffCapMs: {
++                type: "integer",
++                exclusiveMinimum: 0,
++                maximum: 9007199254740991,
++                title: "Write Lock Backoff Cap (ms)",
++                description:
++                  "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
++              },
++              backoffJitterMs: {
++                type: "integer",
++                minimum: 0,
++                maximum: 9007199254740991,
++                title: "Write Lock Backoff Jitter (ms)",
++                description:
++                  "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
++              },
++            },
++            additionalProperties: false,
++            title: "Session Write Lock Tuning",
++            description:
++              "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
++          },
+         },
+         additionalProperties: false,
+         title: "Session",
+@@ -22427,6 +22461,46 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+           load: {
+             type: "object",
+             properties: {
++              promptPathAliases: {
++                type: "array",
++                items: {
++                  type: "object",
++                  properties: {
++                    from: {
++                      type: "string",
++                      title: "Skill Prompt Alias Source Prefix",
++                      description:
++                        "Canonical source path prefix to match against discovered SKILL.md locations before rendering the skills prompt. This should point at the host or gateway-visible directory returned by skill discovery, for example `/home/node/.openclaw/shared/skills`.",
++                    },
++                    to: {
++                      type: "string",
++                      title: "Skill Prompt Alias Target Prefix",
++                      description:
++                        "Replacement path prefix shown to the agent in the skills prompt when a matching source path is found. Point this at the runtime-visible location the read tool can actually open, for example `/shared/skills` inside a sandbox.",
++                    },
++                    when: {
++                      anyOf: [
++                        {
++                          type: "string",
++                          const: "always",
++                        },
++                        {
++                          type: "string",
++                          const: "sandbox",
++                        },
++                      ],
++                      title: "Skill Prompt Alias Scope",
++                      description:
++                        'Controls when the alias applies: `"always"` rewrites prompt locations in every run, while `"sandbox"` only rewrites them for sandboxed sessions.',
++                    },
++                  },
++                  required: ["from", "to"],
++                  additionalProperties: false,
++                },
++                title: "Skill Prompt Path Aliases",
++                description:
++                  "Optional prompt-facing path alias rules for skill locations. Use these when skills are discovered from a host or gateway path but must be read through a different runtime-visible path such as a sandbox bind mount.",
++              },
+               extraDirs: {
+                 type: "array",
+                 items: {
+@@ -24917,6 +24991,26 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+       help: "Per-source broadcast destination list where each key is a source peer ID and the value is an array of destination peer IDs. Keep lists intentional to avoid accidental message amplification.",
+       tags: ["advanced"],
+     },
++    "skills.load.promptPathAliases": {
++      label: "Skill Prompt Path Aliases",
++      help: "Optional prompt-facing path alias rules for skill locations. Use these when skills are discovered from a host or gateway path but must be read through a different runtime-visible path such as a sandbox bind mount.",
++      tags: ["storage"],
++    },
++    "skills.load.promptPathAliases[].from": {
++      label: "Skill Prompt Alias Source Prefix",
++      help: "Canonical source path prefix to match against discovered SKILL.md locations before rendering the skills prompt. This should point at the host or gateway-visible directory returned by skill discovery, for example `/home/node/.openclaw/shared/skills`.",
++      tags: ["storage"],
++    },
++    "skills.load.promptPathAliases[].to": {
++      label: "Skill Prompt Alias Target Prefix",
++      help: "Replacement path prefix shown to the agent in the skills prompt when a matching source path is found. Point this at the runtime-visible location the read tool can actually open, for example `/shared/skills` inside a sandbox.",
++      tags: ["storage"],
++    },
++    "skills.load.promptPathAliases[].when": {
++      label: "Skill Prompt Alias Scope",
++      help: 'Controls when the alias applies: `"always"` rewrites prompt locations in every run, while `"sandbox"` only rewrites them for sandboxed sessions.',
++      tags: ["storage"],
++    },
+     "skills.load.watch": {
+       label: "Watch Skills",
+       help: "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
+@@ -26102,6 +26196,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+       help: "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
+       tags: ["security", "access", "storage", "advanced"],
+     },
++    "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges": {
++      label: "Sandbox Docker Disable No New Privileges",
++      help: "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
++      tags: ["security", "storage", "advanced"],
++    },
+     "commands.native": {
+       label: "Native Commands",
+       help: "Registers native slash/menu commands with channels that support command registration (Discord, Slack, Telegram). Keep enabled for discoverability unless you intentionally run text-only command workflows.",
+@@ -26434,27 +26533,27 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+       tags: ["performance", "storage"],
+     },
+     "session.writeLock": {
+-      label: "Session Write Lock",
++      label: "Session Write Lock Tuning",
+       help: "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
+       tags: ["storage"],
+     },
+     "session.writeLock.timeoutMs": {
+-      label: "Session Write Lock Timeout (ms)",
++      label: "Write Lock Timeout (ms)",
+       help: "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
+       tags: ["performance", "storage"],
+     },
+     "session.writeLock.backoffBaseMs": {
+-      label: "Session Write Lock Backoff Base (ms)",
++      label: "Write Lock Backoff Base (ms)",
+       help: "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
+       tags: ["reliability", "storage"],
+     },
+     "session.writeLock.backoffCapMs": {
+-      label: "Session Write Lock Backoff Cap (ms)",
++      label: "Write Lock Backoff Cap (ms)",
+       help: "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
+       tags: ["reliability", "storage"],
+     },
+     "session.writeLock.backoffJitterMs": {
+-      label: "Session Write Lock Backoff Jitter (ms)",
++      label: "Write Lock Backoff Jitter (ms)",
+       help: "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
+       tags: ["reliability", "storage"],
+     },
+@@ -27200,6 +27299,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+       help: "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
+       tags: ["security", "access", "storage", "advanced"],
+     },
++    "agents.list[].sandbox.docker.dangerouslyDisableNoNewPrivileges": {
++      label: "Agent Sandbox Docker Disable No New Privileges",
++      help: "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
++      tags: ["security", "storage", "advanced"],
++    },
+     "discovery.mdns.mode": {
+       label: "mDNS Discovery Mode",
+       help: 'mDNS broadcast mode ("minimal" default, "full" includes cliPath/sshPort, "off" disables mDNS).',
+diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
+index 12df1771b3..dcdb145ab0 100644
+--- a/src/config/schema.help.ts
++++ b/src/config/schema.help.ts
+@@ -658,6 +658,14 @@ export const FIELD_HELP: Record<string, string> = {
+     "Ordered model preferences specifically for video understanding before shared media fallback applies. Prioritize models with strong multimodal video support to minimize degraded summaries.",
+   "tools.media.video.scope":
+     "Scope selector controlling when video understanding is attempted across incoming events. Narrow scope in noisy channels, and broaden only where video interpretation is core to workflow.",
++  "skills.load.promptPathAliases":
++    "Optional prompt-facing path alias rules for skill locations. Use these when skills are discovered from a host or gateway path but must be read through a different runtime-visible path such as a sandbox bind mount.",
++  "skills.load.promptPathAliases[].from":
++    "Canonical source path prefix to match against discovered SKILL.md locations before rendering the skills prompt. This should point at the host or gateway-visible directory returned by skill discovery, for example `/home/node/.openclaw/shared/skills`.",
++  "skills.load.promptPathAliases[].to":
++    "Replacement path prefix shown to the agent in the skills prompt when a matching source path is found. Point this at the runtime-visible location the read tool can actually open, for example `/shared/skills` inside a sandbox.",
++  "skills.load.promptPathAliases[].when":
++    'Controls when the alias applies: `"always"` rewrites prompt locations in every run, while `"sandbox"` only rewrites them for sandboxed sessions.',
+   "skills.load.watch":
+     "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
+   "skills.load.watchDebounceMs":
+diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
+index 681870c1ff..fa4108bdef 100644
+--- a/src/config/schema.labels.ts
++++ b/src/config/schema.labels.ts
+@@ -347,6 +347,10 @@ export const FIELD_LABELS: Record<string, string> = {
+   broadcast: "Broadcast",
+   "broadcast.strategy": "Broadcast Strategy",
+   "broadcast.*": "Broadcast Destination List",
++  "skills.load.promptPathAliases": "Skill Prompt Path Aliases",
++  "skills.load.promptPathAliases[].from": "Skill Prompt Alias Source Prefix",
++  "skills.load.promptPathAliases[].to": "Skill Prompt Alias Target Prefix",
++  "skills.load.promptPathAliases[].when": "Skill Prompt Alias Scope",
+   "skills.load.watch": "Watch Skills",
+   "skills.load.watchDebounceMs": "Skills Watch Debounce (ms)",
+   "agents.defaults.skills": "Skills",
+diff --git a/src/config/types.skills.ts b/src/config/types.skills.ts
+index c09523ba45..a844405ab9 100644
+--- a/src/config/types.skills.ts
++++ b/src/config/types.skills.ts
+@@ -8,6 +8,19 @@ export type SkillConfig = {
+ };
+ 
+ export type SkillsLoadConfig = {
++  /**
++   * Rewrite prompt-facing skill locations so agents see runtime-visible paths.
++   * Useful when skills are loaded from a gateway-local path but should be read
++   * through a sandbox mount such as `/shared/skills`.
++   */
++  promptPathAliases?: Array<{
++    /** Host or gateway-visible source path prefix to match against canonical SKILL.md paths. */
++    from: string;
++    /** Path prefix to expose to the agent in the skills prompt. */
++    to: string;
++    /** Apply this alias in all runs or only sandboxed runs. */
++    when?: "always" | "sandbox";
++  }>;
+   /**
+    * Additional skill folders to scan (lowest precedence).
+    * Each directory should contain skill subfolders with `SKILL.md`.
+diff --git a/src/config/zod-schema.ts b/src/config/zod-schema.ts
+index ce8c7a1d63..08a408dfe0 100644
+--- a/src/config/zod-schema.ts
++++ b/src/config/zod-schema.ts
+@@ -907,6 +907,17 @@ export const OpenClawSchema = z
+         allowBundled: z.array(z.string()).optional(),
+         load: z
+           .object({
++            promptPathAliases: z
++              .array(
++                z
++                  .object({
++                    from: z.string(),
++                    to: z.string(),
++                    when: z.union([z.literal("always"), z.literal("sandbox")]).optional(),
++                  })
++                  .strict(),
++              )
++              .optional(),
+             extraDirs: z.array(z.string()).optional(),
+             watch: z.boolean().optional(),
+             watchDebounceMs: z.number().int().min(0).optional(),
+diff --git a/src/cron/isolated-agent/run.ts b/src/cron/isolated-agent/run.ts
+index 4cb619d33c..02cf835586 100644
+--- a/src/cron/isolated-agent/run.ts
++++ b/src/cron/isolated-agent/run.ts
+@@ -626,6 +626,7 @@ async function prepareCronRunContext(params: {
+     workspaceDir,
+     config: cfgWithAgentDefaults,
+     agentId,
++    sessionKey: agentSessionKey,
+     existingSnapshot: cronSession.sessionEntry.skillsSnapshot,
+     isFastTestEnv: params.isFastTestEnv,
+   });
+diff --git a/src/cron/isolated-agent/skills-snapshot.ts b/src/cron/isolated-agent/skills-snapshot.ts
+index 97204f7332..09ecc37be3 100644
+--- a/src/cron/isolated-agent/skills-snapshot.ts
++++ b/src/cron/isolated-agent/skills-snapshot.ts
+@@ -15,6 +15,7 @@ export async function resolveCronSkillsSnapshot(params: {
+   workspaceDir: string;
+   config: OpenClawConfig;
+   agentId: string;
++  sessionKey?: string;
+   existingSnapshot?: SkillSnapshot;
+   isFastTestEnv: boolean;
+ }): Promise<SkillSnapshot> {
+@@ -48,5 +49,6 @@ export async function resolveCronSkillsSnapshot(params: {
+       }),
+     },
+     snapshotVersion,
++    sessionKey: params.sessionKey,
+   });
+ }
+-- 
+2.53.0
+

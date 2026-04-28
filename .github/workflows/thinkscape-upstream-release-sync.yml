@@ -55,10 +55,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           SYNC_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
           COPILOT_ASSIGNMENT_TOKEN: ${{ secrets.COPILOT_ASSIGNMENT_TOKEN }}
-          PATCH_REF_SUBAGENT: thinkscape-patch-subagent-gateway-timeout
-          PATCH_REF_SESSION_LOCK: thinkscape-patch-session-write-lock
-          PATCH_REF_SANDBOX_NO_NEW_PRIVILEGES: thinkscape-patch-sandbox-no-new-privileges
-          PATCH_REF_SKILL_PROMPT_ALIAS: thinkscape-patch-skill-prompt-path-alias
+          PATCH_SERIES_FILE: thinkscape/patches/series
         run: |
           mkdir -p "$HOME/.openclaw"
           bash scripts/thinkscape-upstream-release-sync.sh

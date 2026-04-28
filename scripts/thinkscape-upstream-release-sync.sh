@@ -7,22 +7,12 @@ FORK_REPO="${FORK_REPO:-${GITHUB_REPOSITORY:-Thinkscape/openclaw}}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 DOCKER_RELEASE_WORKFLOW="${DOCKER_RELEASE_WORKFLOW:-docker-release.yml}"
 TARGET_IMAGE="${TARGET_IMAGE:-ghcr.io/thinkscape/openclaw}"
-PATCH_REF_SUBAGENT="${PATCH_REF_SUBAGENT:-thinkscape-patch-subagent-gateway-timeout}"
-PATCH_REF_SESSION_LOCK="${PATCH_REF_SESSION_LOCK:-thinkscape-patch-session-write-lock}"
-PATCH_REF_SANDBOX_NO_NEW_PRIVILEGES="${PATCH_REF_SANDBOX_NO_NEW_PRIVILEGES:-thinkscape-patch-sandbox-no-new-privileges}"
-PATCH_REF_SKILL_PROMPT_ALIAS="${PATCH_REF_SKILL_PROMPT_ALIAS:-thinkscape-patch-skill-prompt-path-alias}"
+PATCH_SERIES_FILE="${PATCH_SERIES_FILE:-thinkscape/patches/series}"
 RELEASE_TAG="${RELEASE_TAG:-}"
 SYNC_DRY_RUN="${SYNC_DRY_RUN:-0}"
 COPILOT_ASSIGNMENT_TOKEN="${COPILOT_ASSIGNMENT_TOKEN:-}"
 WORKFLOW_POLL_SECONDS="${WORKFLOW_POLL_SECONDS:-30}"
 WORKFLOW_MAX_POLLS="${WORKFLOW_MAX_POLLS:-240}"
-
-PATCH_REFS=(
-  "${PATCH_REF_SUBAGENT}"
-  "${PATCH_REF_SESSION_LOCK}"
-  "${PATCH_REF_SANDBOX_NO_NEW_PRIVILEGES}"
-  "${PATCH_REF_SKILL_PROMPT_ALIAS}"
-)
 
 log() {
   printf '[release-sync] %s\n' "$*"
@@ -312,30 +302,49 @@ main() {
   git checkout -B "${release_branch}" "origin/${DEFAULT_BRANCH}"
   # Keep workflow files on the fork's main lineage so the default GitHub
   # Actions token can push release refs without extra workflows permission.
-  git restore --source "${upstream_commit}" --staged --worktree -- . ':(exclude).github/workflows'
+  git restore --source "${upstream_commit}" --staged --worktree -- . \
+    ':(exclude).github/workflows' \
+    ':(exclude)scripts/thinkscape-upstream-release-sync.sh' \
+    ':(exclude)thinkscape/patches'
   if ! git diff --quiet || ! git diff --cached --quiet; then
     git commit --no-verify -m "chore(release-sync): stage upstream snapshot for ${release_tag}"
   fi
 
-  local patch_ref
-  for patch_ref in "${PATCH_REFS[@]}"; do
-    log "Cherry-picking patch ref ${patch_ref}"
-    if ! git cherry-pick "${patch_ref}"; then
+  if [[ ! -f "${PATCH_SERIES_FILE}" ]]; then
+    printf 'patch series file not found: %s\n' "${PATCH_SERIES_FILE}" >&2
+    exit 1
+  fi
+
+  local patch_entry patch_file
+  while IFS= read -r patch_entry || [[ -n "${patch_entry}" ]]; do
+    patch_entry="${patch_entry%%#*}"
+    patch_entry="$(printf '%s' "${patch_entry}" | xargs)"
+    [[ -z "${patch_entry}" ]] && continue
+
+    patch_file="$(dirname "${PATCH_SERIES_FILE}")/${patch_entry}"
+    if [[ ! -f "${patch_file}" ]]; then
+      printf 'patch listed in %s not found: %s\n' "${PATCH_SERIES_FILE}" "${patch_file}" >&2
+      exit 1
+    fi
+
+    log "Applying patch ${patch_file}"
+    if ! git am --3way "${patch_file}"; then
       local detail_file
       detail_file="$(mktemp)"
       {
-        printf 'Cherry-pick failed while preparing patched release branch.\n\n'
+        printf 'Patch application failed while preparing patched release branch.\n\n'
         printf -- '- upstream release tag: %s\n' "${release_tag}"
         printf -- '- upstream commit: %s\n' "${upstream_commit}"
         printf -- '- release branch: %s\n' "${release_branch}"
-        printf -- '- failing patch ref: %s\n\n' "${patch_ref}"
+        printf -- '- patch series: %s\n' "${PATCH_SERIES_FILE}"
+        printf -- '- failing patch file: %s\n\n' "${patch_file}"
         printf 'Conflicted files:\n'
         git diff --name-only --diff-filter=U || true
       } >"${detail_file}"
-      git cherry-pick --abort || true
+      git am --abort || true
       fail_with_issue "patch application" "${release_tag}" "${detail_file}"
     fi
-  done
+  done <"${PATCH_SERIES_FILE}"
 
   pnpm install --frozen-lockfile
   pnpm config:schema:gen
