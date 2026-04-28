@@ -1,23 +1,23 @@
-From 9e8a9e1cb6b75ae4a46508efcaba8b06fa3f2eaa Mon Sep 17 00:00:00 2001
+From c5e77c2fb3101d6b6c812cb98a0b1c93d2902e26 Mon Sep 17 00:00:00 2001
 From: Artur Bodera <abodera@gmail.com>
 Date: Wed, 8 Apr 2026 14:48:15 +1000
 Subject: [PATCH] config(subagents): make spawn self-call timeout configurable
 
 ---
- ...nts.sessions-spawn-gateway-timeout.test.ts | 47 +++++++++++++++++++
+ ...nts.sessions-spawn-gateway-timeout.test.ts | 49 +++++++++++++++++++
  src/agents/subagent-spawn.ts                  | 28 ++++++++---
  .../config.agent-concurrency-defaults.test.ts |  2 +
  src/config/types.agent-defaults.ts            |  5 ++
- src/config/zod-schema.agent-defaults.ts       |  8 ++++
- 5 files changed, 84 insertions(+), 6 deletions(-)
+ src/config/zod-schema.agent-defaults.ts       |  8 +++
+ 5 files changed, 86 insertions(+), 6 deletions(-)
  create mode 100644 src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts
 
 diff --git a/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts b/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts
 new file mode 100644
-index 0000000000..0683e0b9af
+index 0000000000..6c0c4acc07
 --- /dev/null
 +++ b/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,49 @@
 +import { beforeEach, describe, expect, it } from "vitest";
 +import "./test-helpers/fast-core-tools.js";
 +import * as sessionsHarness from "./openclaw-tools.subagents.sessions-spawn.test-harness.js";
@@ -55,13 +55,15 @@ index 0000000000..0683e0b9af
 +    sessionsHarness.getCallGatewayMock().mockClear();
 +  });
 +
-+  it("uses configured gatewayTimeoutMs for internal sessions.patch and agent calls", async () => {
++  it("uses configured gatewayTimeoutMs for agent self-call", async () => {
 +    applySubagentGatewayTimeoutDefault(30_000);
 +    const gateway = sessionsHarness.setupSessionsSpawnGatewayMock({});
 +
 +    await spawnSubagent("call-timeout", { task: "hello" });
 +
-+    expect(getGatewayCallTimeouts(gateway.calls, "sessions.patch")).toEqual([30_000, 30_000]);
++    // v2026.4.25 writes child-session metadata directly to the session store,
++    // so the configurable timeout is only observable on the gateway agent self-call.
++    expect(getGatewayCallTimeouts(gateway.calls, "sessions.patch")).toEqual([]);
 +    expect(getGatewayCallTimeouts(gateway.calls, "agent")).toEqual([30_000]);
 +  });
 +});
