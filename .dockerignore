@@ -1,10 +1,6 @@
 .git
 .worktrees
 
-# Fork-maintenance metadata; release branches keep these for provenance, but
-# Docker builds do not need to send patch queues in the build context.
-thinkscape/patches
-
 # Sensitive files – scripts/docker/setup.sh writes .env with OPENCLAW_GATEWAY_TOKEN
 # into the project root; keep it out of the build context.
 .env
@@ -12,6 +8,14 @@ thinkscape/patches
 
 .bun-cache
 .bun
+.artifacts
+**/.artifacts
+.local
+**/.local
+.pi
+**/.pi
+__openclaw_vitest__
+**/__openclaw_vitest__
 .tmp
 **/.tmp
 .DS_Store
@@ -37,9 +41,14 @@ node_modules
 **/.next
 coverage
 **/coverage
+docs/.generated
+**/.generated
 *.log
 tmp
 **/tmp
+dist-runtime
+**/dist-runtime
+openclaw-path-alias-*
 
 # build artifacts
 dist
