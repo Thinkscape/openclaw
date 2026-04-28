@@ -1,13 +1,13 @@
-From ecf35e4f99cb42319fa973d274d2f6bff1903834 Mon Sep 17 00:00:00 2001
+From 953c2165de3f1b5cd5f4f37ac650513e82f956d9 Mon Sep 17 00:00:00 2001
 From: Artur Bodera <abodera@gmail.com>
 Date: Wed, 22 Apr 2026 10:21:42 +1000
 Subject: [PATCH] chore(release-sync): refresh session-write-lock patch for
- v2026.4.20 base
+ v2026.4.26 base
 
-The upstream v2026.4.20 refactored session-write-lock.ts and reverted
-the write-lock backoff config. Re-apply the patch on top of the new
-upstream code with the updated file structure (new watchdog helpers,
-exit handler refactor, etc).
+The upstream v2026.4.26 release introduced orphan lock payload handling
+in session-write-lock.ts. Refresh the write-lock config patch so it
+applies cleanly on top of that upstream layout without losing either
+behavior set.
 ---
  src/agents/session-write-lock.test.ts | 52 +++++++++++++++++++++++
  src/agents/session-write-lock.ts      | 61 ++++++++++++++++++++++++++-
@@ -19,7 +19,7 @@ exit handler refactor, etc).
  7 files changed, 199 insertions(+), 2 deletions(-)
 
 diff --git a/src/agents/session-write-lock.test.ts b/src/agents/session-write-lock.test.ts
-index 637aa4dfdf..6b2f432839 100644
+index 019fbddcb3..94b679b4ea 100644
 --- a/src/agents/session-write-lock.test.ts
 +++ b/src/agents/session-write-lock.test.ts
 @@ -9,6 +9,7 @@ let acquireSessionWriteLock: typeof import("./session-write-lock.js").acquireSes
@@ -30,7 +30,7 @@ index 637aa4dfdf..6b2f432839 100644
  
  vi.mock("../shared/pid-alive.js", async () => {
    const original =
-@@ -101,6 +102,7 @@ describe("acquireSessionWriteLock", () => {
+@@ -133,6 +134,7 @@ describe("acquireSessionWriteLock", () => {
        cleanStaleLockFiles,
        resetSessionWriteLockStateForTest,
        resolveSessionLockMaxHoldFromTimeout,
@@ -38,7 +38,7 @@ index 637aa4dfdf..6b2f432839 100644
      } = await import("./session-write-lock.js"));
    });
  
-@@ -520,3 +522,53 @@ describe("acquireSessionWriteLock", () => {
+@@ -540,3 +542,53 @@ describe("acquireSessionWriteLock", () => {
      }
    });
  });
@@ -93,7 +93,7 @@ index 637aa4dfdf..6b2f432839 100644
 +  });
 +});
 diff --git a/src/agents/session-write-lock.ts b/src/agents/session-write-lock.ts
-index e0113c9676..1a62558ec8 100644
+index c318243e90..0cb5b00fc7 100644
 --- a/src/agents/session-write-lock.ts
 +++ b/src/agents/session-write-lock.ts
 @@ -1,6 +1,7 @@
@@ -103,11 +103,11 @@ index e0113c9676..1a62558ec8 100644
 +import { loadConfig, type OpenClawConfig } from "../config/config.js";
  import { getProcessStartTime, isPidAlive } from "../shared/pid-alive.js";
  import { resolveProcessScopedMap } from "../shared/process-scoped-map.js";
- 
-@@ -45,6 +46,10 @@ const DEFAULT_STALE_MS = 30 * 60 * 1000;
- const DEFAULT_MAX_HOLD_MS = 5 * 60 * 1000;
- const DEFAULT_WATCHDOG_INTERVAL_MS = 60_000;
- const DEFAULT_TIMEOUT_GRACE_MS = 2 * 60 * 1000;
+ import { SessionWriteLockTimeoutError } from "./session-write-lock-error.js";
+@@ -53,6 +54,10 @@ const DEFAULT_TIMEOUT_GRACE_MS = 2 * 60 * 1000;
+ // A payload-less lock can be left behind if shutdown lands between open("wx")
+ // and the owner metadata write. Keep the grace short so 10s callers recover.
+ const ORPHAN_LOCK_PAYLOAD_GRACE_MS = 5_000;
 +const DEFAULT_SESSION_LOCK_TIMEOUT_MS = 10_000;
 +const DEFAULT_SESSION_LOCK_BACKOFF_BASE_MS = 50;
 +const DEFAULT_SESSION_LOCK_BACKOFF_CAP_MS = 1_000;
@@ -115,7 +115,7 @@ index e0113c9676..1a62558ec8 100644
  const MAX_LOCK_HOLD_MS = 2_147_000_000;
  
  type CleanupState = {
-@@ -53,6 +58,50 @@ type CleanupState = {
+@@ -61,6 +66,50 @@ type CleanupState = {
    cleanupHandlers: Map<CleanupSignal, () => void>;
  };
  
@@ -166,7 +166,7 @@ index e0113c9676..1a62558ec8 100644
  type WatchdogState = {
    started: boolean;
    intervalMs: number;
-@@ -483,7 +532,10 @@ export async function acquireSessionWriteLock(params: {
+@@ -509,7 +558,10 @@ export async function acquireSessionWriteLock(params: {
  }> {
    registerCleanupHandlers();
    const allowReentrant = params.allowReentrant ?? false;
@@ -178,7 +178,7 @@ index e0113c9676..1a62558ec8 100644
    const staleMs = resolvePositiveMs(params.staleMs, DEFAULT_STALE_MS);
    const maxHoldMs = resolvePositiveMs(params.maxHoldMs, DEFAULT_MAX_HOLD_MS);
    const sessionFile = path.resolve(params.sessionFile);
-@@ -577,7 +629,12 @@ export async function acquireSessionWriteLock(params: {
+@@ -610,7 +662,12 @@ export async function acquireSessionWriteLock(params: {
        if (remainingMs <= 0) {
          break;
        }
@@ -193,10 +193,10 @@ index e0113c9676..1a62558ec8 100644
      }
    }
 diff --git a/src/config/schema.base.generated.ts b/src/config/schema.base.generated.ts
-index 7c06ae911b..fe8aab6488 100644
+index 399c89a506..ef1f0e9b11 100644
 --- a/src/config/schema.base.generated.ts
 +++ b/src/config/schema.base.generated.ts
-@@ -19671,6 +19671,32 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -20621,6 +20621,32 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
              description:
                "Shared defaults for thread-bound session routing behavior across providers that support thread focus workflows. Configure global defaults here and override per channel only when behavior differs.",
            },
@@ -229,7 +229,7 @@ index 7c06ae911b..fe8aab6488 100644
            maintenance: {
              type: "object",
              properties: {
-@@ -26407,6 +26433,31 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -27466,6 +27492,31 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
        help: "Optional hard max age in hours for thread-bound sessions across providers/channels (0 disables hard cap). Default: 0.",
        tags: ["performance", "storage"],
      },
@@ -262,10 +262,10 @@ index 7c06ae911b..fe8aab6488 100644
        label: "Session Maintenance",
        help: "Automatic session-store maintenance controls for pruning age, entry caps, and file rotation behavior. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
 diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
-index 98358dceb5..f2e397a67a 100644
+index 70ac8b3ac9..cf05f7c7cb 100644
 --- a/src/config/schema.help.ts
 +++ b/src/config/schema.help.ts
-@@ -1353,6 +1353,16 @@ export const FIELD_HELP: Record<string, string> = {
+@@ -1415,6 +1415,16 @@ export const FIELD_HELP: Record<string, string> = {
      "Default inactivity window in hours for thread-bound sessions across providers/channels (0 disables idle auto-unfocus). Default: 24.",
    "session.threadBindings.maxAgeHours":
      "Optional hard max age in hours for thread-bound sessions across providers/channels (0 disables hard cap). Default: 0.",
@@ -283,10 +283,10 @@ index 98358dceb5..f2e397a67a 100644
      "Automatic session-store maintenance controls for pruning age, entry caps, and file rotation behavior. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
    "session.maintenance.mode":
 diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
-index 868b615cbf..3c0aacd2b7 100644
+index 5927605ceb..c892493769 100644
 --- a/src/config/schema.labels.ts
 +++ b/src/config/schema.labels.ts
-@@ -660,6 +660,11 @@ export const FIELD_LABELS: Record<string, string> = {
+@@ -704,6 +704,11 @@ export const FIELD_LABELS: Record<string, string> = {
    "session.threadBindings.enabled": "Thread Binding Enabled",
    "session.threadBindings.idleHours": "Thread Binding Idle Timeout (hours)",
    "session.threadBindings.maxAgeHours": "Thread Binding Max Age (hours)",
@@ -299,7 +299,7 @@ index 868b615cbf..3c0aacd2b7 100644
    "session.maintenance.mode": "Session Maintenance Mode",
    "session.maintenance.pruneAfter": "Session Prune After",
 diff --git a/src/config/types.base.ts b/src/config/types.base.ts
-index b76360eccf..9059a47671 100644
+index 8c5bcf945b..2a40f9c15c 100644
 --- a/src/config/types.base.ts
 +++ b/src/config/types.base.ts
 @@ -186,6 +186,19 @@ export type SessionConfig = {
@@ -323,7 +323,7 @@ index b76360eccf..9059a47671 100644
  
  export type SessionMaintenanceMode = "enforce" | "warn";
 diff --git a/src/config/zod-schema.session.ts b/src/config/zod-schema.session.ts
-index 4b01cce585..1cd658cddf 100644
+index a6f657dc00..4c67a6d1d4 100644
 --- a/src/config/zod-schema.session.ts
 +++ b/src/config/zod-schema.session.ts
 @@ -151,6 +151,15 @@ export const SessionSchema = z
