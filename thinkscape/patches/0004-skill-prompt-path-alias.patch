@@ -1,4 +1,4 @@
-From fba6a17ccb7ef4d34bd7151f3f4ecffbc7fc0159 Mon Sep 17 00:00:00 2001
+From 1f7d972e93b4291de7ffbd20efd6914d1338debd Mon Sep 17 00:00:00 2001
 From: Artur Bodera <abodera@gmail.com>
 Date: Wed, 22 Apr 2026 11:39:54 +1000
 Subject: [PATCH] feat(skills): add runtime prompt path aliases
@@ -6,7 +6,7 @@ Subject: [PATCH] feat(skills): add runtime prompt path aliases
 ---
  docs/gateway/configuration-reference.md       |  11 ++
  docs/tools/skills-config.md                   |  42 +++++
- docs/tools/skills.md                          |   5 +
+ docs/tools/skills.md                          |  11 +-
  src/agents/agent-command.ts                   |   1 +
  src/agents/pi-embedded-runner/compact.ts      |   1 +
  src/agents/pi-embedded-runner/run/attempt.ts  |   1 +
@@ -23,13 +23,13 @@ Subject: [PATCH] feat(skills): add runtime prompt path aliases
  src/config/zod-schema.ts                      |  11 ++
  src/cron/isolated-agent/run.ts                |   1 +
  src/cron/isolated-agent/skills-snapshot.ts    |   2 +
- 19 files changed, 476 insertions(+), 33 deletions(-)
+ 19 files changed, 479 insertions(+), 36 deletions(-)
 
 diff --git a/docs/gateway/configuration-reference.md b/docs/gateway/configuration-reference.md
-index a05e387134..4abc0fcf3a 100644
+index f88afcff49..6087615d45 100644
 --- a/docs/gateway/configuration-reference.md
 +++ b/docs/gateway/configuration-reference.md
-@@ -2855,6 +2855,13 @@ See [Local Models](/gateway/local-models). TL;DR: run a large local model via LM
+@@ -105,6 +105,13 @@ See [MCP](/cli/mcp#openclaw-as-an-mcp-client-registry) and
    skills: {
      allowBundled: ["gemini", "peekaboo"],
      load: {
@@ -43,7 +43,7 @@ index a05e387134..4abc0fcf3a 100644
        extraDirs: ["~/Projects/agent-scripts/skills"],
      },
      install: {
-@@ -2875,6 +2882,10 @@ See [Local Models](/gateway/local-models). TL;DR: run a large local model via LM
+@@ -125,6 +132,10 @@ See [MCP](/cli/mcp#openclaw-as-an-mcp-client-registry) and
  
  - `allowBundled`: optional allowlist for bundled skills only (managed/workspace skills unaffected).
  - `load.extraDirs`: extra shared skill roots (lowest precedence).
@@ -55,10 +55,10 @@ index a05e387134..4abc0fcf3a 100644
    available before falling back to other installer kinds.
  - `install.nodeManager`: node installer preference for `metadata.openclaw.install`
 diff --git a/docs/tools/skills-config.md b/docs/tools/skills-config.md
-index ddf84ac5b2..2894cdf4f3 100644
+index 79cad91324..c72fdd56d9 100644
 --- a/docs/tools/skills-config.md
 +++ b/docs/tools/skills-config.md
-@@ -17,6 +17,13 @@ Most skills loader/install configuration lives under `skills` in
+@@ -15,6 +15,13 @@ Most skills loader/install configuration lives under `skills` in
    skills: {
      allowBundled: ["gemini", "peekaboo"],
      load: {
@@ -72,7 +72,7 @@ index ddf84ac5b2..2894cdf4f3 100644
        extraDirs: ["~/Projects/agent-scripts/skills", "~/Projects/oss/some-skill-pack/skills"],
        watch: true,
        watchDebounceMs: 250,
-@@ -88,6 +95,16 @@ Rules:
+@@ -86,6 +93,16 @@ Rules:
    `<workspace>/.agents/skills`, and `<workspace>/skills`.
  - `allowBundled`: optional allowlist for **bundled** skills only. When set, only
    bundled skills in the list are eligible (managed, agent, and workspace skills unaffected).
@@ -89,7 +89,7 @@ index ddf84ac5b2..2894cdf4f3 100644
  - `load.extraDirs`: additional skill directories to scan (lowest precedence).
  - `load.watch`: watch skill folders and refresh the skills snapshot (default: true).
  - `load.watchDebounceMs`: debounce for skill watcher events in milliseconds (default: 250).
-@@ -120,6 +137,31 @@ Per-skill fields:
+@@ -118,6 +135,31 @@ Per-skill fields:
    `skills.load.extraDirs`.
  - Changes to skills are picked up on the next agent turn when the watcher is enabled.
  
@@ -122,26 +122,32 @@ index ddf84ac5b2..2894cdf4f3 100644
  
  When a session is **sandboxed**, skill processes run inside the configured
 diff --git a/docs/tools/skills.md b/docs/tools/skills.md
-index 4e979cdfe0..bb5120e4d2 100644
+index 24d0f9a38d..b9bb45e40d 100644
 --- a/docs/tools/skills.md
 +++ b/docs/tools/skills.md
-@@ -39,6 +39,11 @@ In **multi-agent** setups, each agent has its own workspace. That means:
- - **Shared folders** can also be added via `skills.load.extraDirs` (lowest
-   precedence) if you want a common skills pack used by multiple agents.
+@@ -41,9 +41,14 @@ In **multi-agent** setups each agent has its own workspace:
+ | Shared managed/local | `~/.openclaw/skills`                        | All agents on that machine  |
+ | Shared extra dirs    | `skills.load.extraDirs` (lowest precedence) | All agents on that machine  |
  
+-Same name in multiple places → highest source wins. Workspace beats
+-project-agent, beats personal-agent, beats managed/local, beats bundled,
+-beats extra dirs.
 +If those shared folders are loaded from a gateway-only path but exposed inside a
 +sandbox through a bind mount, add `skills.load.promptPathAliases` so the agent
 +sees a readable `<location>` such as `/shared/skills/...` instead of the
 +gateway-local source path.
 +
- If the same skill name exists in more than one place, the usual precedence
- applies: workspace wins, then project agent skills, then personal agent skills,
- then managed/local, then bundled, then extra dirs.
++If the same skill name exists in more than one place, the usual precedence
++applies: workspace wins, then project agent skills, then personal agent skills,
++then managed/local, then bundled, then extra dirs.
+ 
+ ## Agent skill allowlists
+ 
 diff --git a/src/agents/agent-command.ts b/src/agents/agent-command.ts
-index b96a210e98..3ba19d060f 100644
+index d9e5764857..39f7a82586 100644
 --- a/src/agents/agent-command.ts
 +++ b/src/agents/agent-command.ts
-@@ -604,6 +604,7 @@ async function agentCommandInternal(
+@@ -622,6 +622,7 @@ async function agentCommandInternal(
                }),
              },
              snapshotVersion: skillsSnapshotVersion,
@@ -150,10 +156,10 @@ index b96a210e98..3ba19d060f 100644
              agentId: sessionAgentId,
            });
 diff --git a/src/agents/pi-embedded-runner/compact.ts b/src/agents/pi-embedded-runner/compact.ts
-index 701139f89a..8a9557eded 100644
+index 43688dda31..1a0edaa76f 100644
 --- a/src/agents/pi-embedded-runner/compact.ts
 +++ b/src/agents/pi-embedded-runner/compact.ts
-@@ -459,6 +459,7 @@ export async function compactEmbeddedPiSessionDirect(
+@@ -470,6 +470,7 @@ export async function compactEmbeddedPiSessionDirect(
        skillsSnapshot: params.skillsSnapshot,
        entries: shouldLoadSkillEntries ? skillEntries : undefined,
        config: params.config,
@@ -162,10 +168,10 @@ index 701139f89a..8a9557eded 100644
        agentId: effectiveSkillAgentId,
      });
 diff --git a/src/agents/pi-embedded-runner/run/attempt.ts b/src/agents/pi-embedded-runner/run/attempt.ts
-index b5adfbe163..fecd773bc2 100644
+index 7a44cec7bd..e463481912 100644
 --- a/src/agents/pi-embedded-runner/run/attempt.ts
 +++ b/src/agents/pi-embedded-runner/run/attempt.ts
-@@ -487,6 +487,7 @@ export async function runEmbeddedAttempt(
+@@ -631,6 +631,7 @@ export async function runEmbeddedAttempt(
        skillsSnapshot: params.skillsSnapshot,
        entries: shouldLoadSkillEntries ? skillEntries : undefined,
        config: params.config,
@@ -277,7 +283,7 @@ index e7a5c70e83..c7f697faa3 100644
      const entry: SkillEntry = {
        skill: createFixtureSkill({
 diff --git a/src/agents/skills/workspace.ts b/src/agents/skills/workspace.ts
-index 496131452b..d6049e728c 100644
+index 7592171e48..a02e84f81e 100644
 --- a/src/agents/skills/workspace.ts
 +++ b/src/agents/skills/workspace.ts
 @@ -8,6 +8,7 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
@@ -478,10 +484,10 @@ index 496131452b..d6049e728c 100644
      return prompt.trim() ? prompt : "";
    }
 diff --git a/src/auto-reply/reply/commands-system-prompt.ts b/src/auto-reply/reply/commands-system-prompt.ts
-index 2ca45e3c95..c8cc6a4a34 100644
+index 04d11e12d6..14eec96e28 100644
 --- a/src/auto-reply/reply/commands-system-prompt.ts
 +++ b/src/auto-reply/reply/commands-system-prompt.ts
-@@ -71,6 +71,7 @@ export async function resolveCommandsSystemPromptBundle(
+@@ -73,6 +73,7 @@ export async function resolveCommandsSystemPromptBundle(
            }),
          },
          snapshotVersion: getSkillsSnapshotVersion(workspaceDir),
@@ -531,10 +537,10 @@ index 4ce0e39046..402a8dfbb2 100644
      const res = OpenClawSchema.safeParse({
        skills: {
 diff --git a/src/config/schema.base.generated.ts b/src/config/schema.base.generated.ts
-index fe8aab6488..4232578923 100644
+index 2390f1cc60..23b5173551 100644
 --- a/src/config/schema.base.generated.ts
 +++ b/src/config/schema.base.generated.ts
-@@ -5181,6 +5181,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -5441,6 +5441,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                      minimum: 0,
                      maximum: 9007199254740991,
                    },
@@ -548,7 +554,7 @@ index fe8aab6488..4232578923 100644
                    announceTimeoutMs: {
                      type: "integer",
                      exclusiveMinimum: 0,
-@@ -5402,6 +5409,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -5662,6 +5669,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                          description:
                            "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
                        },
@@ -561,7 +567,7 @@ index fe8aab6488..4232578923 100644
                      },
                      additionalProperties: false,
                    },
-@@ -6736,6 +6749,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -7390,6 +7403,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                            description:
                              "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
                          },
@@ -574,7 +580,7 @@ index fe8aab6488..4232578923 100644
                        },
                        additionalProperties: false,
                      },
-@@ -19671,32 +19690,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -20539,32 +20558,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
              description:
                "Shared defaults for thread-bound session routing behavior across providers that support thread focus workflows. Configure global defaults here and override per channel only when behavior differs.",
            },
@@ -607,7 +613,7 @@ index fe8aab6488..4232578923 100644
            maintenance: {
              type: "object",
              properties: {
-@@ -19798,6 +19791,47 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -20666,6 +20659,47 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
              description:
                "Automatic session-store maintenance controls for pruning age, entry caps, and file rotation behavior. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
            },
@@ -655,7 +661,7 @@ index fe8aab6488..4232578923 100644
          },
          additionalProperties: false,
          title: "Session",
-@@ -22427,6 +22461,46 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -23326,6 +23360,46 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
            load: {
              type: "object",
              properties: {
@@ -702,7 +708,7 @@ index fe8aab6488..4232578923 100644
                extraDirs: {
                  type: "array",
                  items: {
-@@ -24917,6 +24991,26 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -25799,6 +25873,26 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
        help: "Per-source broadcast destination list where each key is a source peer ID and the value is an array of destination peer IDs. Keep lists intentional to avoid accidental message amplification.",
        tags: ["advanced"],
      },
@@ -729,7 +735,7 @@ index fe8aab6488..4232578923 100644
      "skills.load.watch": {
        label: "Watch Skills",
        help: "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
-@@ -26102,6 +26196,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -26999,6 +27093,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
        help: "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
        tags: ["security", "access", "storage", "advanced"],
      },
@@ -741,7 +747,7 @@ index fe8aab6488..4232578923 100644
      "commands.native": {
        label: "Native Commands",
        help: "Registers native slash/menu commands with channels that support command registration (Discord, Slack, Telegram). Keep enabled for discoverability unless you intentionally run text-only command workflows.",
-@@ -26434,27 +26533,27 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -27356,27 +27455,27 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
        tags: ["performance", "storage"],
      },
      "session.writeLock": {
@@ -774,7 +780,7 @@ index fe8aab6488..4232578923 100644
        help: "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
        tags: ["reliability", "storage"],
      },
-@@ -27200,6 +27299,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -28152,6 +28251,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
        help: "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
        tags: ["security", "access", "storage", "advanced"],
      },
@@ -787,10 +793,10 @@ index fe8aab6488..4232578923 100644
        label: "mDNS Discovery Mode",
        help: 'mDNS broadcast mode ("minimal" default, "full" includes cliPath/sshPort, "off" disables mDNS).',
 diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
-index 12df1771b3..dcdb145ab0 100644
+index a44978f60c..c332603ace 100644
 --- a/src/config/schema.help.ts
 +++ b/src/config/schema.help.ts
-@@ -658,6 +658,14 @@ export const FIELD_HELP: Record<string, string> = {
+@@ -712,6 +712,14 @@ export const FIELD_HELP: Record<string, string> = {
      "Ordered model preferences specifically for video understanding before shared media fallback applies. Prioritize models with strong multimodal video support to minimize degraded summaries.",
    "tools.media.video.scope":
      "Scope selector controlling when video understanding is attempted across incoming events. Narrow scope in noisy channels, and broaden only where video interpretation is core to workflow.",
@@ -806,10 +812,10 @@ index 12df1771b3..dcdb145ab0 100644
      "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
    "skills.load.watchDebounceMs":
 diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
-index 681870c1ff..fa4108bdef 100644
+index fcbf70eaea..9f8050543e 100644
 --- a/src/config/schema.labels.ts
 +++ b/src/config/schema.labels.ts
-@@ -347,6 +347,10 @@ export const FIELD_LABELS: Record<string, string> = {
+@@ -374,6 +374,10 @@ export const FIELD_LABELS: Record<string, string> = {
    broadcast: "Broadcast",
    "broadcast.strategy": "Broadcast Strategy",
    "broadcast.*": "Broadcast Destination List",
@@ -845,10 +851,10 @@ index c09523ba45..a844405ab9 100644
     * Additional skill folders to scan (lowest precedence).
     * Each directory should contain skill subfolders with `SKILL.md`.
 diff --git a/src/config/zod-schema.ts b/src/config/zod-schema.ts
-index ce8c7a1d63..08a408dfe0 100644
+index 8eb41a1606..be1da81e6f 100644
 --- a/src/config/zod-schema.ts
 +++ b/src/config/zod-schema.ts
-@@ -907,6 +907,17 @@ export const OpenClawSchema = z
+@@ -955,6 +955,17 @@ export const OpenClawSchema = z
          allowBundled: z.array(z.string()).optional(),
          load: z
            .object({
@@ -867,10 +873,10 @@ index ce8c7a1d63..08a408dfe0 100644
              watch: z.boolean().optional(),
              watchDebounceMs: z.number().int().min(0).optional(),
 diff --git a/src/cron/isolated-agent/run.ts b/src/cron/isolated-agent/run.ts
-index 4cb619d33c..02cf835586 100644
+index f1168a700e..d8eb087576 100644
 --- a/src/cron/isolated-agent/run.ts
 +++ b/src/cron/isolated-agent/run.ts
-@@ -626,6 +626,7 @@ async function prepareCronRunContext(params: {
+@@ -651,6 +651,7 @@ async function prepareCronRunContext(params: {
      workspaceDir,
      config: cfgWithAgentDefaults,
      agentId,
