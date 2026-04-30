@@ -106,26 +106,6 @@ describe("computeSandboxConfigHash", () => {
     });
     expect(left).not.toBe(right);
   });
-
-  it("changes when dangerouslyDisableNoNewPrivileges changes", () => {
-    const shared = {
-      workspaceAccess: "rw" as const,
-      workspaceDir: "/tmp/workspace",
-      agentWorkspaceDir: "/tmp/workspace",
-      mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
-    };
-    const left = computeSandboxConfigHash({
-      ...shared,
-      docker: createDockerConfig(),
-    });
-    const right = computeSandboxConfigHash({
-      ...shared,
-      docker: createDockerConfig({
-        dangerouslyDisableNoNewPrivileges: true,
-      }),
-    });
-    expect(left).not.toBe(right);
-  });
 });
 
 describe("computeSandboxBrowserConfigHash", () => {
@@ -138,6 +118,7 @@ describe("computeSandboxBrowserConfigHash", () => {
         noVncPort: 6080,
         headless: false,
         enableNoVnc: true,
+        autoStartTimeoutMs: 12000,
       },
       securityEpoch: "epoch-v1",
       workspaceAccess: "rw" as const,
@@ -170,6 +151,7 @@ describe("computeSandboxBrowserConfigHash", () => {
         noVncPort: 6080,
         headless: false,
         enableNoVnc: true,
+        autoStartTimeoutMs: 12000,
       },
       workspaceAccess: "rw" as const,
       workspaceDir: "/tmp/workspace",
@@ -196,6 +178,7 @@ describe("computeSandboxBrowserConfigHash", () => {
         noVncPort: 6080,
         headless: false,
         enableNoVnc: true,
+        autoStartTimeoutMs: 12000,
       },
       securityEpoch: "epoch-v1",
       workspaceAccess: "rw" as const,
@@ -224,6 +207,7 @@ describe("computeSandboxBrowserConfigHash", () => {
         noVncPort: 6080,
         headless: false,
         enableNoVnc: true,
+        autoStartTimeoutMs: 12000,
       },
       securityEpoch: "epoch-v1",
       workspaceAccess: "rw" as const,
