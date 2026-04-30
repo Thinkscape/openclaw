@@ -1,4 +1,4 @@
-From 1f7d972e93b4291de7ffbd20efd6914d1338debd Mon Sep 17 00:00:00 2001
+From c5a244f02dd2bed6809a72d2adab8d0394e18e69 Mon Sep 17 00:00:00 2001
 From: Artur Bodera <abodera@gmail.com>
 Date: Wed, 22 Apr 2026 11:39:54 +1000
 Subject: [PATCH] feat(skills): add runtime prompt path aliases
@@ -26,10 +26,10 @@ Subject: [PATCH] feat(skills): add runtime prompt path aliases
  19 files changed, 479 insertions(+), 36 deletions(-)
 
 diff --git a/docs/gateway/configuration-reference.md b/docs/gateway/configuration-reference.md
-index f88afcff49..6087615d45 100644
+index f0112b69be..12fd134d76 100644
 --- a/docs/gateway/configuration-reference.md
 +++ b/docs/gateway/configuration-reference.md
-@@ -105,6 +105,13 @@ See [MCP](/cli/mcp#openclaw-as-an-mcp-client-registry) and
+@@ -130,6 +130,13 @@ See [MCP](/cli/mcp#openclaw-as-an-mcp-client-registry) and
    skills: {
      allowBundled: ["gemini", "peekaboo"],
      load: {
@@ -43,7 +43,7 @@ index f88afcff49..6087615d45 100644
        extraDirs: ["~/Projects/agent-scripts/skills"],
      },
      install: {
-@@ -125,6 +132,10 @@ See [MCP](/cli/mcp#openclaw-as-an-mcp-client-registry) and
+@@ -150,6 +157,10 @@ See [MCP](/cli/mcp#openclaw-as-an-mcp-client-registry) and
  
  - `allowBundled`: optional allowlist for bundled skills only (managed/workspace skills unaffected).
  - `load.extraDirs`: extra shared skill roots (lowest precedence).
@@ -122,7 +122,7 @@ index 79cad91324..c72fdd56d9 100644
  
  When a session is **sandboxed**, skill processes run inside the configured
 diff --git a/docs/tools/skills.md b/docs/tools/skills.md
-index 24d0f9a38d..b9bb45e40d 100644
+index 244bb29d32..d8cf6027cc 100644
 --- a/docs/tools/skills.md
 +++ b/docs/tools/skills.md
 @@ -41,9 +41,14 @@ In **multi-agent** setups each agent has its own workspace:
@@ -144,10 +144,10 @@ index 24d0f9a38d..b9bb45e40d 100644
  ## Agent skill allowlists
  
 diff --git a/src/agents/agent-command.ts b/src/agents/agent-command.ts
-index d9e5764857..39f7a82586 100644
+index 91f0c6dcbd..c058a719a0 100644
 --- a/src/agents/agent-command.ts
 +++ b/src/agents/agent-command.ts
-@@ -622,6 +622,7 @@ async function agentCommandInternal(
+@@ -678,6 +678,7 @@ async function agentCommandInternal(
                }),
              },
              snapshotVersion: skillsSnapshotVersion,
@@ -156,10 +156,10 @@ index d9e5764857..39f7a82586 100644
              agentId: sessionAgentId,
            });
 diff --git a/src/agents/pi-embedded-runner/compact.ts b/src/agents/pi-embedded-runner/compact.ts
-index 43688dda31..1a0edaa76f 100644
+index 6b14b2d9f9..f87f036f53 100644
 --- a/src/agents/pi-embedded-runner/compact.ts
 +++ b/src/agents/pi-embedded-runner/compact.ts
-@@ -470,6 +470,7 @@ export async function compactEmbeddedPiSessionDirect(
+@@ -482,6 +482,7 @@ export async function compactEmbeddedPiSessionDirect(
        skillsSnapshot: params.skillsSnapshot,
        entries: shouldLoadSkillEntries ? skillEntries : undefined,
        config: params.config,
@@ -168,10 +168,10 @@ index 43688dda31..1a0edaa76f 100644
        agentId: effectiveSkillAgentId,
      });
 diff --git a/src/agents/pi-embedded-runner/run/attempt.ts b/src/agents/pi-embedded-runner/run/attempt.ts
-index 7a44cec7bd..e463481912 100644
+index 9576989e1b..b836c0ab16 100644
 --- a/src/agents/pi-embedded-runner/run/attempt.ts
 +++ b/src/agents/pi-embedded-runner/run/attempt.ts
-@@ -631,6 +631,7 @@ export async function runEmbeddedAttempt(
+@@ -639,6 +639,7 @@ export async function runEmbeddedAttempt(
        skillsSnapshot: params.skillsSnapshot,
        entries: shouldLoadSkillEntries ? skillEntries : undefined,
        config: params.config,
@@ -484,7 +484,7 @@ index 7592171e48..a02e84f81e 100644
      return prompt.trim() ? prompt : "";
    }
 diff --git a/src/auto-reply/reply/commands-system-prompt.ts b/src/auto-reply/reply/commands-system-prompt.ts
-index 04d11e12d6..14eec96e28 100644
+index 426648c426..902940b972 100644
 --- a/src/auto-reply/reply/commands-system-prompt.ts
 +++ b/src/auto-reply/reply/commands-system-prompt.ts
 @@ -73,6 +73,7 @@ export async function resolveCommandsSystemPromptBundle(
@@ -496,10 +496,10 @@ index 04d11e12d6..14eec96e28 100644
      } catch {
        return { prompt: "", skills: [], resolvedSkills: [] };
 diff --git a/src/auto-reply/reply/session-updates.ts b/src/auto-reply/reply/session-updates.ts
-index 80361a800f..f3fccac35c 100644
+index e774f73546..61bbc77cb5 100644
 --- a/src/auto-reply/reply/session-updates.ts
 +++ b/src/auto-reply/reply/session-updates.ts
-@@ -155,6 +155,7 @@ export async function ensureSkillSnapshot(params: {
+@@ -161,6 +161,7 @@ export async function ensureSkillSnapshot(params: {
        skillFilter,
        eligibility: { remote: remoteEligibility },
        snapshotVersion,
@@ -537,10 +537,10 @@ index 4ce0e39046..402a8dfbb2 100644
      const res = OpenClawSchema.safeParse({
        skills: {
 diff --git a/src/config/schema.base.generated.ts b/src/config/schema.base.generated.ts
-index 2390f1cc60..23b5173551 100644
+index b7025b041a..30cc6d073b 100644
 --- a/src/config/schema.base.generated.ts
 +++ b/src/config/schema.base.generated.ts
-@@ -5441,6 +5441,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -5540,6 +5540,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                      minimum: 0,
                      maximum: 9007199254740991,
                    },
@@ -554,7 +554,7 @@ index 2390f1cc60..23b5173551 100644
                    announceTimeoutMs: {
                      type: "integer",
                      exclusiveMinimum: 0,
-@@ -5662,6 +5669,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -5768,6 +5775,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                          description:
                            "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
                        },
@@ -567,7 +567,7 @@ index 2390f1cc60..23b5173551 100644
                      },
                      additionalProperties: false,
                    },
-@@ -7390,6 +7403,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -7524,6 +7537,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                            description:
                              "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
                          },
@@ -580,7 +580,7 @@ index 2390f1cc60..23b5173551 100644
                        },
                        additionalProperties: false,
                      },
-@@ -20539,32 +20558,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -20680,32 +20699,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
              description:
                "Shared defaults for thread-bound session routing behavior across providers that support thread focus workflows. Configure global defaults here and override per channel only when behavior differs.",
            },
@@ -613,9 +613,9 @@ index 2390f1cc60..23b5173551 100644
            maintenance: {
              type: "object",
              properties: {
-@@ -20666,6 +20659,47 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -20807,6 +20800,47 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
              description:
-               "Automatic session-store maintenance controls for pruning age, entry caps, and file rotation behavior. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
+               "Automatic session-store maintenance controls for pruning age, entry caps, reset archive retention, and disk budget cleanup. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
            },
 +          writeLock: {
 +            type: "object",
@@ -661,7 +661,7 @@ index 2390f1cc60..23b5173551 100644
          },
          additionalProperties: false,
          title: "Session",
-@@ -23326,6 +23360,46 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -23485,6 +23519,46 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
            load: {
              type: "object",
              properties: {
@@ -708,7 +708,7 @@ index 2390f1cc60..23b5173551 100644
                extraDirs: {
                  type: "array",
                  items: {
-@@ -25799,6 +25873,26 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -25971,6 +26045,26 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
        help: "Per-source broadcast destination list where each key is a source peer ID and the value is an array of destination peer IDs. Keep lists intentional to avoid accidental message amplification.",
        tags: ["advanced"],
      },
@@ -735,7 +735,7 @@ index 2390f1cc60..23b5173551 100644
      "skills.load.watch": {
        label: "Watch Skills",
        help: "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
-@@ -26999,6 +27093,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -27231,6 +27325,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
        help: "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
        tags: ["security", "access", "storage", "advanced"],
      },
@@ -744,10 +744,10 @@ index 2390f1cc60..23b5173551 100644
 +      help: "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
 +      tags: ["security", "storage", "advanced"],
 +    },
-     "commands.native": {
-       label: "Native Commands",
-       help: "Registers native slash/menu commands with channels that support command registration (Discord, Slack, Telegram). Keep enabled for discoverability unless you intentionally run text-only command workflows.",
-@@ -27356,27 +27455,27 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+     "agents.defaults.sandbox.docker.gpus": {
+       label: "Sandbox Docker GPUs",
+       help: 'Optional Docker GPU passthrough value passed to --gpus, for example "all" or "device=GPU-uuid". Requires a compatible host runtime such as NVIDIA Container Toolkit.',
+@@ -27593,27 +27692,27 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
        tags: ["performance", "storage"],
      },
      "session.writeLock": {
@@ -780,7 +780,7 @@ index 2390f1cc60..23b5173551 100644
        help: "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
        tags: ["reliability", "storage"],
      },
-@@ -28152,6 +28251,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+@@ -28394,6 +28493,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
        help: "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
        tags: ["security", "access", "storage", "advanced"],
      },
@@ -789,14 +789,14 @@ index 2390f1cc60..23b5173551 100644
 +      help: "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
 +      tags: ["security", "storage", "advanced"],
 +    },
-     "discovery.mdns.mode": {
-       label: "mDNS Discovery Mode",
-       help: 'mDNS broadcast mode ("minimal" default, "full" includes cliPath/sshPort, "off" disables mDNS).',
+     "agents.list[].sandbox.docker.gpus": {
+       label: "Agent Sandbox Docker GPUs",
+       help: "Per-agent Docker GPU passthrough override for sandbox containers.",
 diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
-index a44978f60c..c332603ace 100644
+index 972d47c20b..ffcd214775 100644
 --- a/src/config/schema.help.ts
 +++ b/src/config/schema.help.ts
-@@ -712,6 +712,14 @@ export const FIELD_HELP: Record<string, string> = {
+@@ -716,6 +716,14 @@ export const FIELD_HELP: Record<string, string> = {
      "Ordered model preferences specifically for video understanding before shared media fallback applies. Prioritize models with strong multimodal video support to minimize degraded summaries.",
    "tools.media.video.scope":
      "Scope selector controlling when video understanding is attempted across incoming events. Narrow scope in noisy channels, and broaden only where video interpretation is core to workflow.",
@@ -812,7 +812,7 @@ index a44978f60c..c332603ace 100644
      "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
    "skills.load.watchDebounceMs":
 diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
-index fcbf70eaea..9f8050543e 100644
+index 1f00b0f537..5701c3a727 100644
 --- a/src/config/schema.labels.ts
 +++ b/src/config/schema.labels.ts
 @@ -374,6 +374,10 @@ export const FIELD_LABELS: Record<string, string> = {
@@ -851,10 +851,10 @@ index c09523ba45..a844405ab9 100644
     * Additional skill folders to scan (lowest precedence).
     * Each directory should contain skill subfolders with `SKILL.md`.
 diff --git a/src/config/zod-schema.ts b/src/config/zod-schema.ts
-index 8eb41a1606..be1da81e6f 100644
+index 08ee6fb6d6..9a8bfc9524 100644
 --- a/src/config/zod-schema.ts
 +++ b/src/config/zod-schema.ts
-@@ -955,6 +955,17 @@ export const OpenClawSchema = z
+@@ -959,6 +959,17 @@ export const OpenClawSchema = z
          allowBundled: z.array(z.string()).optional(),
          load: z
            .object({
@@ -873,10 +873,10 @@ index 8eb41a1606..be1da81e6f 100644
              watch: z.boolean().optional(),
              watchDebounceMs: z.number().int().min(0).optional(),
 diff --git a/src/cron/isolated-agent/run.ts b/src/cron/isolated-agent/run.ts
-index f1168a700e..d8eb087576 100644
+index c5ba5bd852..a1e934f05c 100644
 --- a/src/cron/isolated-agent/run.ts
 +++ b/src/cron/isolated-agent/run.ts
-@@ -651,6 +651,7 @@ async function prepareCronRunContext(params: {
+@@ -690,6 +690,7 @@ async function prepareCronRunContext(params: {
      workspaceDir,
      config: cfgWithAgentDefaults,
      agentId,

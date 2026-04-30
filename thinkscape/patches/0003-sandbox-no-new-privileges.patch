@@ -1,4 +1,4 @@
-From c80af0f9e956e75681ecc69d432aafb64b568b2f Mon Sep 17 00:00:00 2001
+From 3c8b3c067ec7aaa8387ea670ca0c3c60834a9e43 Mon Sep 17 00:00:00 2001
 From: Artur Bodera <abodera@gmail.com>
 Date: Wed, 8 Apr 2026 14:55:01 +1000
 Subject: [PATCH] feat(sandbox): restore no-new-privileges override
@@ -16,11 +16,10 @@ Subject: [PATCH] feat(sandbox): restore no-new-privileges override
  src/security/audit-extra.sync.ts              | 14 +++++
  .../audit-sandbox-docker-config.test.ts       | 22 ++++++++
  src/security/dangerous-config-flags.test.ts   | 38 +++++++++++++
- src/security/dangerous-config-flags.ts        |  8 +++
- 13 files changed, 189 insertions(+), 1 deletion(-)
+ 12 files changed, 181 insertions(+), 1 deletion(-)
 
 diff --git a/src/agents/sandbox-create-args.test.ts b/src/agents/sandbox-create-args.test.ts
-index 60b6241f58..cf4b9f25d6 100644
+index 4f5fae4b9b..2d773b7bbd 100644
 --- a/src/agents/sandbox-create-args.test.ts
 +++ b/src/agents/sandbox-create-args.test.ts
 @@ -137,6 +137,21 @@ describe("buildSandboxCreateArgs", () => {
@@ -75,7 +74,7 @@ index 7defa48e6d..f63b496a29 100644
      const shared = {
        workspaceAccess: "rw" as const,
 diff --git a/src/agents/sandbox/config.ts b/src/agents/sandbox/config.ts
-index 54a4c36aae..672df9b194 100644
+index d8688a801f..27b8ea67f9 100644
 --- a/src/agents/sandbox/config.ts
 +++ b/src/agents/sandbox/config.ts
 @@ -32,6 +32,7 @@ export const DANGEROUS_SANDBOX_DOCKER_BOOLEAN_KEYS = [
@@ -154,7 +153,7 @@ index 4242ab8c57..00ec2c8110 100644
      const workspaceDir = "/tmp/workspace";
      const cfg = createSandboxConfig([]);
 diff --git a/src/agents/sandbox/docker.ts b/src/agents/sandbox/docker.ts
-index c9da918049..dacc00e4a4 100644
+index ce7477531b..90fb5e9d80 100644
 --- a/src/agents/sandbox/docker.ts
 +++ b/src/agents/sandbox/docker.ts
 @@ -413,7 +413,9 @@ export function buildSandboxCreateArgs(params: {
@@ -169,10 +168,10 @@ index c9da918049..dacc00e4a4 100644
      args.push("--security-opt", `seccomp=${params.cfg.seccompProfile}`);
    }
 diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
-index f2e397a67a..12df1771b3 100644
+index 35d7646bfd..972d47c20b 100644
 --- a/src/config/schema.help.ts
 +++ b/src/config/schema.help.ts
-@@ -396,6 +396,10 @@ export const FIELD_HELP: Record<string, string> = {
+@@ -422,6 +422,10 @@ export const FIELD_HELP: Record<string, string> = {
      "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
    "agents.list[].sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
      "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
@@ -180,36 +179,36 @@ index f2e397a67a..12df1771b3 100644
 +    "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
 +  "agents.list[].sandbox.docker.dangerouslyDisableNoNewPrivileges":
 +    "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
-   "agents.defaults.sandbox.browser.cdpSourceRange":
-     "Optional CIDR allowlist for container-edge CDP ingress (for example 172.21.0.1/32).",
-   "agents.list[].sandbox.browser.cdpSourceRange":
+   "agents.defaults.sandbox.docker.gpus":
+     'Optional Docker GPU passthrough value passed to --gpus, for example "all" or "device=GPU-uuid". Requires a compatible host runtime such as NVIDIA Container Toolkit.',
+   "agents.list[].sandbox.docker.gpus":
 diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
-index 3c0aacd2b7..681870c1ff 100644
+index b3a064bb47..1f00b0f537 100644
 --- a/src/config/schema.labels.ts
 +++ b/src/config/schema.labels.ts
-@@ -591,6 +591,8 @@ export const FIELD_LABELS: Record<string, string> = {
+@@ -635,6 +635,8 @@ export const FIELD_LABELS: Record<string, string> = {
    "agents.defaults.sandbox.browser.cdpSourceRange": "Sandbox Browser CDP Source Port Range",
    "agents.defaults.sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
      "Sandbox Docker Allow Container Namespace Join",
 +  "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges":
 +    "Sandbox Docker Disable No New Privileges",
+   "agents.defaults.sandbox.docker.gpus": "Sandbox Docker GPUs",
    commands: "Commands",
    "commands.native": "Native Commands",
-   "commands.nativeSkills": "Native Skill Commands",
-@@ -828,6 +830,8 @@ export const FIELD_LABELS: Record<string, string> = {
+@@ -885,6 +887,8 @@ export const FIELD_LABELS: Record<string, string> = {
    "agents.list[].sandbox.browser.cdpSourceRange": "Agent Sandbox Browser CDP Source Port Range",
    "agents.list[].sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
      "Agent Sandbox Docker Allow Container Namespace Join",
 +  "agents.list[].sandbox.docker.dangerouslyDisableNoNewPrivileges":
 +    "Agent Sandbox Docker Disable No New Privileges",
+   "agents.list[].sandbox.docker.gpus": "Agent Sandbox Docker GPUs",
    "discovery.mdns.mode": "mDNS Discovery Mode",
    plugins: "Plugins",
-   "plugins.enabled": "Enable Plugins",
 diff --git a/src/config/types.sandbox.ts b/src/config/types.sandbox.ts
-index 04128e2ffa..438de9be80 100644
+index 1a4670d3c2..f6b5d38562 100644
 --- a/src/config/types.sandbox.ts
 +++ b/src/config/types.sandbox.ts
-@@ -59,6 +59,11 @@ export type SandboxDockerSettings = {
+@@ -61,6 +61,11 @@ export type SandboxDockerSettings = {
     * Default behavior blocks container namespace joins to preserve sandbox isolation.
     */
    dangerouslyAllowContainerNamespaceJoin?: boolean;
@@ -222,10 +221,10 @@ index 04128e2ffa..438de9be80 100644
  
  export type SandboxBrowserSettings = {
 diff --git a/src/config/zod-schema.agent-runtime.ts b/src/config/zod-schema.agent-runtime.ts
-index 5401abeb34..d4b045897a 100644
+index 5783791020..1bd5ed13a6 100644
 --- a/src/config/zod-schema.agent-runtime.ts
 +++ b/src/config/zod-schema.agent-runtime.ts
-@@ -141,6 +141,7 @@ export const SandboxDockerSchema = z
+@@ -143,6 +143,7 @@ export const SandboxDockerSchema = z
      dangerouslyAllowReservedContainerTargets: z.boolean().optional(),
      dangerouslyAllowExternalBindSources: z.boolean().optional(),
      dangerouslyAllowContainerNamespaceJoin: z.boolean().optional(),
@@ -234,10 +233,10 @@ index 5401abeb34..d4b045897a 100644
    .strict()
    .superRefine((data, ctx) => {
 diff --git a/src/security/audit-extra.sync.ts b/src/security/audit-extra.sync.ts
-index 7200d846c0..db42aed1b6 100644
+index 85264a9049..c555980de6 100644
 --- a/src/security/audit-extra.sync.ts
 +++ b/src/security/audit-extra.sync.ts
-@@ -843,6 +843,20 @@ export function collectSandboxDangerousConfigFindings(cfg: OpenClawConfig): Secu
+@@ -840,6 +840,20 @@ export function collectSandboxDangerousConfigFindings(cfg: OpenClawConfig): Secu
          remediation: `Remove ${source}.apparmorProfile or use a named AppArmor profile.`,
        });
      }
@@ -292,10 +291,10 @@ index 5eb631bd8f..0b7a3751b9 100644
  
        await Promise.all(
 diff --git a/src/security/dangerous-config-flags.test.ts b/src/security/dangerous-config-flags.test.ts
-index 198059c4d6..9d9b1c84be 100644
+index bd14bf2ba1..a93eb16b21 100644
 --- a/src/security/dangerous-config-flags.test.ts
 +++ b/src/security/dangerous-config-flags.test.ts
-@@ -49,6 +49,44 @@ describe("collectEnabledInsecureOrDangerousFlags", () => {
+@@ -37,6 +37,44 @@ describe("collectEnabledInsecureOrDangerousFlags", () => {
      ).toContain("plugins.entries.acpx.config.permissionMode=approve-all");
    });
  
@@ -338,34 +337,8 @@ index 198059c4d6..9d9b1c84be 100644
 +  });
 +
    it("ignores plugin config values that are not declared as dangerous", () => {
-     loadPluginManifestRegistryMock.mockReturnValue({
-       plugins: [
-diff --git a/src/security/dangerous-config-flags.ts b/src/security/dangerous-config-flags.ts
-index 1d50a9abed..8fcf7bf978 100644
---- a/src/security/dangerous-config-flags.ts
-+++ b/src/security/dangerous-config-flags.ts
-@@ -71,6 +71,9 @@ export function collectEnabledInsecureOrDangerousFlags(cfg: OpenClawConfig): str
-   if (cfg.tools?.fs?.workspaceOnly === false) {
-     enabledFlags.push("tools.fs.workspaceOnly=false");
-   }
-+  if (cfg.agents?.defaults?.sandbox?.docker?.dangerouslyDisableNoNewPrivileges === true) {
-+    enabledFlags.push("agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges=true");
-+  }
-   collectSandboxDockerDangerousFlags(
-     isRecord(cfg.agents?.defaults?.sandbox?.docker)
-       ? cfg.agents?.defaults?.sandbox?.docker
-@@ -79,6 +82,11 @@ export function collectEnabledInsecureOrDangerousFlags(cfg: OpenClawConfig): str
-   );
-   if (Array.isArray(cfg.agents?.list)) {
-     for (const [index, agent] of cfg.agents.list.entries()) {
-+      if (agent?.id && agent.sandbox?.docker?.dangerouslyDisableNoNewPrivileges === true) {
-+        enabledFlags.push(
-+          `agents.list.${index}.sandbox.docker.dangerouslyDisableNoNewPrivileges=true`,
-+        );
-+      }
-       collectSandboxDockerDangerousFlags(
-         isRecord(agent?.sandbox?.docker) ? agent.sandbox.docker : undefined,
-         `${getAgentDangerousFlagPathSegment(agent, index)}.sandbox.docker`,
+     expect(
+       collectEnabledInsecureOrDangerousFlagsFromContracts(
 -- 
 2.53.0
 
