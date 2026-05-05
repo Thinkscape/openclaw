@@ -84,7 +84,7 @@ index eed7fef2e2d..ebce77a98d0 100644
    return subagentSpawnDeps.getRuntimeConfig();
  }
  
-+export function resolveSubagentGatewayTimeoutMs(cfg: ReturnType<typeof loadConfig>): number | undefined {
++export function resolveSubagentGatewayTimeoutMs(cfg: ReturnType<typeof getRuntimeConfig>): number | undefined {
 +  const configured = cfg.agents?.defaults?.subagents?.gatewayTimeoutMs;
 +  if (typeof configured !== "number" || !Number.isFinite(configured)) {
 +    return undefined;
