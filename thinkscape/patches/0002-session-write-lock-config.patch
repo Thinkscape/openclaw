@@ -61,7 +61,7 @@ index 9893047a113..91c3ce1ff9e 100644
 +    const result = resolveSessionWriteLockConfig({
 +      session: {
 +        writeLock: {
-+          timeoutMs: 30_000,
++          acquireTimeoutMs: 30_000,
 +          backoffBaseMs: 25,
 +          backoffCapMs: 500,
 +          backoffJitterMs: 10,
@@ -228,12 +228,26 @@ index e9bb3befa91..bd162aa7029 100644
        .optional(),
 +    writeLock: z
 +      .object({
-+        timeoutMs: z.number().int().positive().optional(),
++        acquireTimeoutMs: z.number().int().positive().optional(),
 +        backoffBaseMs: z.number().int().positive().optional(),
 +        backoffCapMs: z.number().int().positive().optional(),
-+        backoffJitterMs: z.number().int().min(0).optional(),
++        backoffJitterMs: z.number().int().nonnegative().optional(),
 +      })
 +      .strict()
++      .superRefine((val, ctx) => {
++        if (
++          typeof val.backoffBaseMs === "number" &&
++          typeof val.backoffCapMs === "number" &&
++          val.backoffBaseMs > val.backoffCapMs
++        ) {
++          ctx.addIssue({
++            code: z.ZodIssueCode.custom,
++            message:
++              "backoffBaseMs must be <= backoffCapMs",
++            path: ["backoffBaseMs"],
++          });
++        }
++      })
 +      .optional(),
    })
    .strict()
