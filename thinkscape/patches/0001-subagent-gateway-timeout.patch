@@ -1,6 +1,6 @@
-From 8c5ad1c7fee7259ae8a48383596276791c516a31 Mon Sep 17 00:00:00 2001
-From: Test User <test@example.com>
-Date: Tue, 5 May 2026 11:31:59 +1000
+From 5cab738bc1767983a8554203f0455d7c1b97c019 Mon Sep 17 00:00:00 2001
+From: Artur Bodera <abodera@gmail.com>
+Date: Wed, 8 Apr 2026 14:48:15 +1000
 Subject: [PATCH] feat(config): make subagent spawn self-call timeout
  configurable
 
@@ -15,7 +15,7 @@ Subject: [PATCH] feat(config): make subagent spawn self-call timeout
 
 diff --git a/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts b/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts
 new file mode 100644
-index 0000000000..c9b6f29572
+index 00000000000..c9b6f295729
 --- /dev/null
 +++ b/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts
 @@ -0,0 +1,49 @@
@@ -69,7 +69,7 @@ index 0000000000..c9b6f29572
 +  });
 +});
 diff --git a/src/agents/subagent-spawn.ts b/src/agents/subagent-spawn.ts
-index eed7fef2e2..ebce77a98d 100644
+index eed7fef2e2d..ebce77a98d0 100644
 --- a/src/agents/subagent-spawn.ts
 +++ b/src/agents/subagent-spawn.ts
 @@ -115,6 +115,7 @@ let subagentSpawnDeps: SubagentSpawnDeps = defaultSubagentSpawnDeps;
@@ -205,7 +205,7 @@ index eed7fef2e2..ebce77a98d 100644
      } catch {
        // Best-effort cleanup only.
 diff --git a/src/config/config.agent-concurrency-defaults.test.ts b/src/config/config.agent-concurrency-defaults.test.ts
-index f5bda63b0e..5f66348050 100644
+index f5bda63b0ed..5f663480501 100644
 --- a/src/config/config.agent-concurrency-defaults.test.ts
 +++ b/src/config/config.agent-concurrency-defaults.test.ts
 @@ -27,13 +27,14 @@ describe("agent concurrency defaults", () => {
@@ -233,7 +233,7 @@ index f5bda63b0e..5f66348050 100644
  
    it("injects missing agent defaults", () => {
 diff --git a/src/config/types.agent-defaults.ts b/src/config/types.agent-defaults.ts
-index 08b847cc59..a728cf1f94 100644
+index 08b847cc591..a728cf1f948 100644
 --- a/src/config/types.agent-defaults.ts
 +++ b/src/config/types.agent-defaults.ts
 @@ -428,6 +428,11 @@ export type AgentDefaultsConfig = {
@@ -249,7 +249,7 @@ index 08b847cc59..a728cf1f94 100644
      announceTimeoutMs?: number;
      /** Require explicit agentId in sessions_spawn (no default same-as-caller). Default: false. */
 diff --git a/src/config/zod-schema.agent-defaults.ts b/src/config/zod-schema.agent-defaults.ts
-index eb43b95436..bb440ce541 100644
+index eb43b954360..bb440ce541f 100644
 --- a/src/config/zod-schema.agent-defaults.ts
 +++ b/src/config/zod-schema.agent-defaults.ts
 @@ -281,6 +281,14 @@ export const AgentDefaultsSchema = z

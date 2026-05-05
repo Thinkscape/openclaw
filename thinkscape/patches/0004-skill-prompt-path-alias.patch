@@ -1,32 +1,31 @@
-From c5a244f02dd2bed6809a72d2adab8d0394e18e69 Mon Sep 17 00:00:00 2001
+From 61d90bebfbac905d486b1ac99395f2641340bcdf Mon Sep 17 00:00:00 2001
 From: Artur Bodera <abodera@gmail.com>
 Date: Wed, 22 Apr 2026 11:39:54 +1000
 Subject: [PATCH] feat(skills): add runtime prompt path aliases
 
 ---
  docs/gateway/configuration-reference.md       |  11 ++
- docs/tools/skills-config.md                   |  42 +++++
+ docs/tools/skills-config.md                   |  42 ++++++
  docs/tools/skills.md                          |  11 +-
- src/agents/agent-command.ts                   |   1 +
+ src/agents/agent-command.ts                   |  33 +++-
  src/agents/pi-embedded-runner/compact.ts      |   1 +
  src/agents/pi-embedded-runner/run/attempt.ts  |   1 +
- ...skills.buildworkspaceskillsnapshot.test.ts |  45 +++++
- .../skills.resolveskillspromptforrun.test.ts  |  36 ++++
- src/agents/skills/workspace.ts                | 142 ++++++++++++++-
+ ...skills.buildworkspaceskillsnapshot.test.ts |  45 ++++++
+ .../skills.resolveskillspromptforrun.test.ts  |  36 +++++
+ src/agents/skills/workspace.ts                | 142 +++++++++++++++++-
  .../reply/commands-system-prompt.ts           |   1 +
  src/auto-reply/reply/session-updates.ts       |   1 +
- .../config.skills-entries-config.test.ts      |  18 ++
- src/config/schema.base.generated.ts           | 166 ++++++++++++++----
+ .../config.skills-entries-config.test.ts      |  18 +++
  src/config/schema.help.ts                     |   8 +
  src/config/schema.labels.ts                   |   4 +
  src/config/types.skills.ts                    |  13 ++
  src/config/zod-schema.ts                      |  11 ++
  src/cron/isolated-agent/run.ts                |   1 +
  src/cron/isolated-agent/skills-snapshot.ts    |   2 +
- 19 files changed, 479 insertions(+), 36 deletions(-)
+ 18 files changed, 372 insertions(+), 9 deletions(-)
 
 diff --git a/docs/gateway/configuration-reference.md b/docs/gateway/configuration-reference.md
-index f0112b69be..12fd134d76 100644
+index 1afaa8d8581..7bc0911ace2 100644
 --- a/docs/gateway/configuration-reference.md
 +++ b/docs/gateway/configuration-reference.md
 @@ -130,6 +130,13 @@ See [MCP](/cli/mcp#openclaw-as-an-mcp-client-registry) and
@@ -55,7 +54,7 @@ index f0112b69be..12fd134d76 100644
    available before falling back to other installer kinds.
  - `install.nodeManager`: node installer preference for `metadata.openclaw.install`
 diff --git a/docs/tools/skills-config.md b/docs/tools/skills-config.md
-index 79cad91324..c72fdd56d9 100644
+index 79cad91324e..c72fdd56d9e 100644
 --- a/docs/tools/skills-config.md
 +++ b/docs/tools/skills-config.md
 @@ -15,6 +15,13 @@ Most skills loader/install configuration lives under `skills` in
@@ -122,10 +121,10 @@ index 79cad91324..c72fdd56d9 100644
  
  When a session is **sandboxed**, skill processes run inside the configured
 diff --git a/docs/tools/skills.md b/docs/tools/skills.md
-index 244bb29d32..d8cf6027cc 100644
+index b9320c6b029..046c2c27874 100644
 --- a/docs/tools/skills.md
 +++ b/docs/tools/skills.md
-@@ -41,9 +41,14 @@ In **multi-agent** setups each agent has its own workspace:
+@@ -49,9 +49,14 @@ In **multi-agent** setups each agent has its own workspace:
  | Shared managed/local | `~/.openclaw/skills`                        | All agents on that machine  |
  | Shared extra dirs    | `skills.load.extraDirs` (lowest precedence) | All agents on that machine  |
  
@@ -144,22 +143,54 @@ index 244bb29d32..d8cf6027cc 100644
  ## Agent skill allowlists
  
 diff --git a/src/agents/agent-command.ts b/src/agents/agent-command.ts
-index 91f0c6dcbd..c058a719a0 100644
+index cc2767984ff..6a0d0eda26b 100644
 --- a/src/agents/agent-command.ts
 +++ b/src/agents/agent-command.ts
-@@ -678,6 +678,7 @@ async function agentCommandInternal(
-               }),
-             },
-             snapshotVersion: skillsSnapshotVersion,
+@@ -662,10 +662,35 @@ async function agentCommandInternal(
+       });
+     };
+     const skillsSnapshot = needsSkillsSnapshot
+-      ? await buildSkillsSnapshot()
+-      : !currentSkillsSnapshot
+-        ? undefined
+-        : await hydrateResolvedSkillsAsync(currentSkillsSnapshot, buildSkillsSnapshot);
++      ? await (async () => {
++          const [
++            { buildWorkspaceSkillSnapshot },
++            { getRemoteSkillEligibility },
++            { canExecRequestNode },
++          ] = await Promise.all([
++            loadSkillsRuntime(),
++            loadSkillsRemoteRuntime(),
++            loadExecDefaultsRuntime(),
++          ]);
++          return buildWorkspaceSkillSnapshot(workspaceDir, {
++            config: cfg,
++            eligibility: {
++              remote: getRemoteSkillEligibility({
++                advertiseExecNode: canExecRequestNode({
++                  cfg,
++                  sessionEntry,
++                  sessionKey,
++                  agentId: sessionAgentId,
++                }),
++              }),
++            },
++            snapshotVersion: skillsSnapshotVersion,
 +            sessionKey,
-             skillFilter,
-             agentId: sessionAgentId,
-           });
++            skillFilter,
++            agentId: sessionAgentId,
++          });
++        })()
++      : currentSkillsSnapshot;
+ 
+     if (skillsSnapshot && sessionStore && sessionKey && needsSkillsSnapshot) {
+       const now = Date.now();
 diff --git a/src/agents/pi-embedded-runner/compact.ts b/src/agents/pi-embedded-runner/compact.ts
-index 6b14b2d9f9..f87f036f53 100644
+index bdf51e6daa1..51966594b76 100644
 --- a/src/agents/pi-embedded-runner/compact.ts
 +++ b/src/agents/pi-embedded-runner/compact.ts
-@@ -482,6 +482,7 @@ export async function compactEmbeddedPiSessionDirect(
+@@ -593,6 +593,7 @@ async function compactEmbeddedPiSessionDirectOnce(
        skillsSnapshot: params.skillsSnapshot,
        entries: shouldLoadSkillEntries ? skillEntries : undefined,
        config: params.config,
@@ -168,10 +199,10 @@ index 6b14b2d9f9..f87f036f53 100644
        agentId: effectiveSkillAgentId,
      });
 diff --git a/src/agents/pi-embedded-runner/run/attempt.ts b/src/agents/pi-embedded-runner/run/attempt.ts
-index 9576989e1b..b836c0ab16 100644
+index b594e10876a..daa2a80e264 100644
 --- a/src/agents/pi-embedded-runner/run/attempt.ts
 +++ b/src/agents/pi-embedded-runner/run/attempt.ts
-@@ -639,6 +639,7 @@ export async function runEmbeddedAttempt(
+@@ -812,6 +812,7 @@ export async function runEmbeddedAttempt(
        skillsSnapshot: params.skillsSnapshot,
        entries: shouldLoadSkillEntries ? skillEntries : undefined,
        config: params.config,
@@ -180,11 +211,11 @@ index 9576989e1b..b836c0ab16 100644
        agentId: sessionAgentId,
      });
 diff --git a/src/agents/skills.buildworkspaceskillsnapshot.test.ts b/src/agents/skills.buildworkspaceskillsnapshot.test.ts
-index e1174952e6..e3ea70fdbc 100644
+index 893d269efe9..6c111581b98 100644
 --- a/src/agents/skills.buildworkspaceskillsnapshot.test.ts
 +++ b/src/agents/skills.buildworkspaceskillsnapshot.test.ts
-@@ -252,6 +252,51 @@ describe("buildWorkspaceSkillSnapshot", () => {
-     expect(snapshot.prompt).not.toContain("repo-skill-07");
+@@ -257,6 +257,51 @@ describe("buildWorkspaceSkillSnapshot", () => {
+     }
    });
  
 +  it("rewrites prompt-facing extra-dir skill paths for sandboxed sessions", async () => {
@@ -236,7 +267,7 @@ index e1174952e6..e3ea70fdbc 100644
      const workspaceDir = await fixtureSuite.createCaseDir("workspace");
  
 diff --git a/src/agents/skills.resolveskillspromptforrun.test.ts b/src/agents/skills.resolveskillspromptforrun.test.ts
-index e7a5c70e83..c7f697faa3 100644
+index e7a5c70e839..c7f697faa33 100644
 --- a/src/agents/skills.resolveskillspromptforrun.test.ts
 +++ b/src/agents/skills.resolveskillspromptforrun.test.ts
 @@ -11,6 +11,42 @@ describe("resolveSkillsPromptForRun", () => {
@@ -283,7 +314,7 @@ index e7a5c70e83..c7f697faa3 100644
      const entry: SkillEntry = {
        skill: createFixtureSkill({
 diff --git a/src/agents/skills/workspace.ts b/src/agents/skills/workspace.ts
-index 7592171e48..a02e84f81e 100644
+index bced0bb130f..41a53440519 100644
 --- a/src/agents/skills/workspace.ts
 +++ b/src/agents/skills/workspace.ts
 @@ -8,6 +8,7 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
@@ -432,7 +463,7 @@ index 7592171e48..a02e84f81e 100644
  function isSkillVisibleInAvailableSkillsPrompt(entry: SkillEntry): boolean {
    if (entry.exposure) {
      return entry.exposure.includeInAvailableSkillsPrompt !== false;
-@@ -748,6 +873,7 @@ type WorkspaceSkillBuildOptions = {
+@@ -846,6 +971,7 @@ type WorkspaceSkillBuildOptions = {
    bundledSkillsDir?: string;
    entries?: SkillEntry[];
    agentId?: string;
@@ -440,7 +471,7 @@ index 7592171e48..a02e84f81e 100644
    /** If provided, only include skills with these names */
    skillFilter?: string[];
    eligibility?: SkillEligibilityContext;
-@@ -784,11 +910,17 @@ function resolveWorkspaceSkillPromptState(
+@@ -882,11 +1008,17 @@ function resolveWorkspaceSkillPromptState(
    const promptEntries = eligible.filter((entry) => isSkillVisibleInAvailableSkillsPrompt(entry));
    const remoteNote = opts?.eligibility?.remote?.note?.trim();
    const resolvedSkills = promptEntries.map((entry) => entry.skill);
@@ -459,7 +490,7 @@ index 7592171e48..a02e84f81e 100644
      .slice()
      .sort((a, b) => a.name.localeCompare(b.name, "en"));
    const { skillsForPrompt, truncated, compact } = applySkillsPromptLimits({
-@@ -817,16 +949,22 @@ export function resolveSkillsPromptForRun(params: {
+@@ -915,16 +1047,22 @@ export function resolveSkillsPromptForRun(params: {
    config?: OpenClawConfig;
    workspaceDir: string;
    agentId?: string;
@@ -484,7 +515,7 @@ index 7592171e48..a02e84f81e 100644
      return prompt.trim() ? prompt : "";
    }
 diff --git a/src/auto-reply/reply/commands-system-prompt.ts b/src/auto-reply/reply/commands-system-prompt.ts
-index 426648c426..902940b972 100644
+index 426648c4263..902940b972c 100644
 --- a/src/auto-reply/reply/commands-system-prompt.ts
 +++ b/src/auto-reply/reply/commands-system-prompt.ts
 @@ -73,6 +73,7 @@ export async function resolveCommandsSystemPromptBundle(
@@ -496,10 +527,10 @@ index 426648c426..902940b972 100644
      } catch {
        return { prompt: "", skills: [], resolvedSkills: [] };
 diff --git a/src/auto-reply/reply/session-updates.ts b/src/auto-reply/reply/session-updates.ts
-index e774f73546..61bbc77cb5 100644
+index 2e2f09edcbb..41f91463b07 100644
 --- a/src/auto-reply/reply/session-updates.ts
 +++ b/src/auto-reply/reply/session-updates.ts
-@@ -161,6 +161,7 @@ export async function ensureSkillSnapshot(params: {
+@@ -167,6 +167,7 @@ export async function ensureSkillSnapshot(params: {
        skillFilter,
        eligibility: { remote: remoteEligibility },
        snapshotVersion,
@@ -508,7 +539,7 @@ index e774f73546..61bbc77cb5 100644
  
    if (isFirstTurnInSession && sessionStore && sessionKey) {
 diff --git a/src/config/config.skills-entries-config.test.ts b/src/config/config.skills-entries-config.test.ts
-index 4ce0e39046..402a8dfbb2 100644
+index 4ce0e390466..402a8dfbb24 100644
 --- a/src/config/config.skills-entries-config.test.ts
 +++ b/src/config/config.skills-entries-config.test.ts
 @@ -20,6 +20,24 @@ describe("skills entries config schema", () => {
@@ -536,267 +567,11 @@ index 4ce0e39046..402a8dfbb2 100644
    it("rejects unknown top-level fields", () => {
      const res = OpenClawSchema.safeParse({
        skills: {
-diff --git a/src/config/schema.base.generated.ts b/src/config/schema.base.generated.ts
-index b7025b041a..30cc6d073b 100644
---- a/src/config/schema.base.generated.ts
-+++ b/src/config/schema.base.generated.ts
-@@ -5540,6 +5540,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-                     minimum: 0,
-                     maximum: 9007199254740991,
-                   },
-+                  gatewayTimeoutMs: {
-+                    description:
-+                      "Internal gateway timeout in milliseconds for sub-agent spawn self-calls such as sessions.patch, agent, and sessions.delete (default: 10000). Increase on slower gateways or remote filesystems that delay child acceptance.",
-+                    type: "integer",
-+                    exclusiveMinimum: 0,
-+                    maximum: 9007199254740991,
-+                  },
-                   announceTimeoutMs: {
-                     type: "integer",
-                     exclusiveMinimum: 0,
-@@ -5768,6 +5775,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-                         description:
-                           "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
-                       },
-+                      dangerouslyDisableNoNewPrivileges: {
-+                        type: "boolean",
-+                        title: "Sandbox Docker Disable No New Privileges",
-+                        description:
-+                          "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
-+                      },
-                     },
-                     additionalProperties: false,
-                   },
-@@ -7524,6 +7537,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-                           description:
-                             "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
-                         },
-+                        dangerouslyDisableNoNewPrivileges: {
-+                          type: "boolean",
-+                          title: "Agent Sandbox Docker Disable No New Privileges",
-+                          description:
-+                            "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
-+                        },
-                       },
-                       additionalProperties: false,
-                     },
-@@ -20680,32 +20699,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-             description:
-               "Shared defaults for thread-bound session routing behavior across providers that support thread focus workflows. Configure global defaults here and override per channel only when behavior differs.",
-           },
--          writeLock: {
--            type: "object",
--            properties: {
--              timeoutMs: {
--                type: "integer",
--                exclusiveMinimum: 0,
--                maximum: 9007199254740991,
--              },
--              backoffBaseMs: {
--                type: "integer",
--                exclusiveMinimum: 0,
--                maximum: 9007199254740991,
--              },
--              backoffCapMs: {
--                type: "integer",
--                exclusiveMinimum: 0,
--                maximum: 9007199254740991,
--              },
--              backoffJitterMs: {
--                type: "integer",
--                minimum: 0,
--                maximum: 9007199254740991,
--              },
--            },
--            additionalProperties: false,
--          },
-           maintenance: {
-             type: "object",
-             properties: {
-@@ -20807,6 +20800,47 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-             description:
-               "Automatic session-store maintenance controls for pruning age, entry caps, reset archive retention, and disk budget cleanup. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
-           },
-+          writeLock: {
-+            type: "object",
-+            properties: {
-+              timeoutMs: {
-+                type: "integer",
-+                exclusiveMinimum: 0,
-+                maximum: 9007199254740991,
-+                title: "Write Lock Timeout (ms)",
-+                description:
-+                  "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
-+              },
-+              backoffBaseMs: {
-+                type: "integer",
-+                exclusiveMinimum: 0,
-+                maximum: 9007199254740991,
-+                title: "Write Lock Backoff Base (ms)",
-+                description:
-+                  "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
-+              },
-+              backoffCapMs: {
-+                type: "integer",
-+                exclusiveMinimum: 0,
-+                maximum: 9007199254740991,
-+                title: "Write Lock Backoff Cap (ms)",
-+                description:
-+                  "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
-+              },
-+              backoffJitterMs: {
-+                type: "integer",
-+                minimum: 0,
-+                maximum: 9007199254740991,
-+                title: "Write Lock Backoff Jitter (ms)",
-+                description:
-+                  "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
-+              },
-+            },
-+            additionalProperties: false,
-+            title: "Session Write Lock Tuning",
-+            description:
-+              "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
-+          },
-         },
-         additionalProperties: false,
-         title: "Session",
-@@ -23485,6 +23519,46 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-           load: {
-             type: "object",
-             properties: {
-+              promptPathAliases: {
-+                type: "array",
-+                items: {
-+                  type: "object",
-+                  properties: {
-+                    from: {
-+                      type: "string",
-+                      title: "Skill Prompt Alias Source Prefix",
-+                      description:
-+                        "Canonical source path prefix to match against discovered SKILL.md locations before rendering the skills prompt. This should point at the host or gateway-visible directory returned by skill discovery, for example `/home/node/.openclaw/shared/skills`.",
-+                    },
-+                    to: {
-+                      type: "string",
-+                      title: "Skill Prompt Alias Target Prefix",
-+                      description:
-+                        "Replacement path prefix shown to the agent in the skills prompt when a matching source path is found. Point this at the runtime-visible location the read tool can actually open, for example `/shared/skills` inside a sandbox.",
-+                    },
-+                    when: {
-+                      anyOf: [
-+                        {
-+                          type: "string",
-+                          const: "always",
-+                        },
-+                        {
-+                          type: "string",
-+                          const: "sandbox",
-+                        },
-+                      ],
-+                      title: "Skill Prompt Alias Scope",
-+                      description:
-+                        'Controls when the alias applies: `"always"` rewrites prompt locations in every run, while `"sandbox"` only rewrites them for sandboxed sessions.',
-+                    },
-+                  },
-+                  required: ["from", "to"],
-+                  additionalProperties: false,
-+                },
-+                title: "Skill Prompt Path Aliases",
-+                description:
-+                  "Optional prompt-facing path alias rules for skill locations. Use these when skills are discovered from a host or gateway path but must be read through a different runtime-visible path such as a sandbox bind mount.",
-+              },
-               extraDirs: {
-                 type: "array",
-                 items: {
-@@ -25971,6 +26045,26 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-       help: "Per-source broadcast destination list where each key is a source peer ID and the value is an array of destination peer IDs. Keep lists intentional to avoid accidental message amplification.",
-       tags: ["advanced"],
-     },
-+    "skills.load.promptPathAliases": {
-+      label: "Skill Prompt Path Aliases",
-+      help: "Optional prompt-facing path alias rules for skill locations. Use these when skills are discovered from a host or gateway path but must be read through a different runtime-visible path such as a sandbox bind mount.",
-+      tags: ["storage"],
-+    },
-+    "skills.load.promptPathAliases[].from": {
-+      label: "Skill Prompt Alias Source Prefix",
-+      help: "Canonical source path prefix to match against discovered SKILL.md locations before rendering the skills prompt. This should point at the host or gateway-visible directory returned by skill discovery, for example `/home/node/.openclaw/shared/skills`.",
-+      tags: ["storage"],
-+    },
-+    "skills.load.promptPathAliases[].to": {
-+      label: "Skill Prompt Alias Target Prefix",
-+      help: "Replacement path prefix shown to the agent in the skills prompt when a matching source path is found. Point this at the runtime-visible location the read tool can actually open, for example `/shared/skills` inside a sandbox.",
-+      tags: ["storage"],
-+    },
-+    "skills.load.promptPathAliases[].when": {
-+      label: "Skill Prompt Alias Scope",
-+      help: 'Controls when the alias applies: `"always"` rewrites prompt locations in every run, while `"sandbox"` only rewrites them for sandboxed sessions.',
-+      tags: ["storage"],
-+    },
-     "skills.load.watch": {
-       label: "Watch Skills",
-       help: "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
-@@ -27231,6 +27325,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-       help: "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
-       tags: ["security", "access", "storage", "advanced"],
-     },
-+    "agents.defaults.sandbox.docker.dangerouslyDisableNoNewPrivileges": {
-+      label: "Sandbox Docker Disable No New Privileges",
-+      help: "DANGEROUS break-glass override that disables Docker's no-new-privileges guard for sandbox containers. This allows setuid elevation such as sudo inside the sandbox and weakens isolation.",
-+      tags: ["security", "storage", "advanced"],
-+    },
-     "agents.defaults.sandbox.docker.gpus": {
-       label: "Sandbox Docker GPUs",
-       help: 'Optional Docker GPU passthrough value passed to --gpus, for example "all" or "device=GPU-uuid". Requires a compatible host runtime such as NVIDIA Container Toolkit.',
-@@ -27593,27 +27692,27 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-       tags: ["performance", "storage"],
-     },
-     "session.writeLock": {
--      label: "Session Write Lock",
-+      label: "Session Write Lock Tuning",
-       help: "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
-       tags: ["storage"],
-     },
-     "session.writeLock.timeoutMs": {
--      label: "Session Write Lock Timeout (ms)",
-+      label: "Write Lock Timeout (ms)",
-       help: "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
-       tags: ["performance", "storage"],
-     },
-     "session.writeLock.backoffBaseMs": {
--      label: "Session Write Lock Backoff Base (ms)",
-+      label: "Write Lock Backoff Base (ms)",
-       help: "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
-       tags: ["reliability", "storage"],
-     },
-     "session.writeLock.backoffCapMs": {
--      label: "Session Write Lock Backoff Cap (ms)",
-+      label: "Write Lock Backoff Cap (ms)",
-       help: "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
-       tags: ["reliability", "storage"],
-     },
-     "session.writeLock.backoffJitterMs": {
--      label: "Session Write Lock Backoff Jitter (ms)",
-+      label: "Write Lock Backoff Jitter (ms)",
-       help: "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
-       tags: ["reliability", "storage"],
-     },
-@@ -28394,6 +28493,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-       help: "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
-       tags: ["security", "access", "storage", "advanced"],
-     },
-+    "agents.list[].sandbox.docker.dangerouslyDisableNoNewPrivileges": {
-+      label: "Agent Sandbox Docker Disable No New Privileges",
-+      help: "Per-agent DANGEROUS override that disables Docker no-new-privileges for sandbox containers.",
-+      tags: ["security", "storage", "advanced"],
-+    },
-     "agents.list[].sandbox.docker.gpus": {
-       label: "Agent Sandbox Docker GPUs",
-       help: "Per-agent Docker GPU passthrough override for sandbox containers.",
 diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
-index 972d47c20b..ffcd214775 100644
+index 2b468090fb6..2718fbd98b2 100644
 --- a/src/config/schema.help.ts
 +++ b/src/config/schema.help.ts
-@@ -716,6 +716,14 @@ export const FIELD_HELP: Record<string, string> = {
+@@ -738,6 +738,14 @@ export const FIELD_HELP: Record<string, string> = {
      "Ordered model preferences specifically for video understanding before shared media fallback applies. Prioritize models with strong multimodal video support to minimize degraded summaries.",
    "tools.media.video.scope":
      "Scope selector controlling when video understanding is attempted across incoming events. Narrow scope in noisy channels, and broaden only where video interpretation is core to workflow.",
@@ -812,10 +587,10 @@ index 972d47c20b..ffcd214775 100644
      "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
    "skills.load.watchDebounceMs":
 diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
-index 1f00b0f537..5701c3a727 100644
+index 529bed7478d..619b1260a0b 100644
 --- a/src/config/schema.labels.ts
 +++ b/src/config/schema.labels.ts
-@@ -374,6 +374,10 @@ export const FIELD_LABELS: Record<string, string> = {
+@@ -377,6 +377,10 @@ export const FIELD_LABELS: Record<string, string> = {
    broadcast: "Broadcast",
    "broadcast.strategy": "Broadcast Strategy",
    "broadcast.*": "Broadcast Destination List",
@@ -827,7 +602,7 @@ index 1f00b0f537..5701c3a727 100644
    "skills.load.watchDebounceMs": "Skills Watch Debounce (ms)",
    "agents.defaults.skills": "Skills",
 diff --git a/src/config/types.skills.ts b/src/config/types.skills.ts
-index c09523ba45..a844405ab9 100644
+index c09523ba459..a844405ab99 100644
 --- a/src/config/types.skills.ts
 +++ b/src/config/types.skills.ts
 @@ -8,6 +8,19 @@ export type SkillConfig = {
@@ -851,10 +626,10 @@ index c09523ba45..a844405ab9 100644
     * Additional skill folders to scan (lowest precedence).
     * Each directory should contain skill subfolders with `SKILL.md`.
 diff --git a/src/config/zod-schema.ts b/src/config/zod-schema.ts
-index 08ee6fb6d6..9a8bfc9524 100644
+index 33a4e8c0592..ad1e3681ec2 100644
 --- a/src/config/zod-schema.ts
 +++ b/src/config/zod-schema.ts
-@@ -959,6 +959,17 @@ export const OpenClawSchema = z
+@@ -1025,6 +1025,17 @@ export const OpenClawSchema = z
          allowBundled: z.array(z.string()).optional(),
          load: z
            .object({
@@ -873,10 +648,10 @@ index 08ee6fb6d6..9a8bfc9524 100644
              watch: z.boolean().optional(),
              watchDebounceMs: z.number().int().min(0).optional(),
 diff --git a/src/cron/isolated-agent/run.ts b/src/cron/isolated-agent/run.ts
-index c5ba5bd852..a1e934f05c 100644
+index c85cbb32a5f..6bb96065ce3 100644
 --- a/src/cron/isolated-agent/run.ts
 +++ b/src/cron/isolated-agent/run.ts
-@@ -690,6 +690,7 @@ async function prepareCronRunContext(params: {
+@@ -686,6 +686,7 @@ async function prepareCronRunContext(params: {
      workspaceDir,
      config: cfgWithAgentDefaults,
      agentId,
@@ -885,7 +660,7 @@ index c5ba5bd852..a1e934f05c 100644
      isFastTestEnv: params.isFastTestEnv,
    });
 diff --git a/src/cron/isolated-agent/skills-snapshot.ts b/src/cron/isolated-agent/skills-snapshot.ts
-index 97204f7332..09ecc37be3 100644
+index 7ce63a25b56..1af54bd101c 100644
 --- a/src/cron/isolated-agent/skills-snapshot.ts
 +++ b/src/cron/isolated-agent/skills-snapshot.ts
 @@ -15,6 +15,7 @@ export async function resolveCronSkillsSnapshot(params: {

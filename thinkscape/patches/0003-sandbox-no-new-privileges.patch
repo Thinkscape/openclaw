@@ -1,4 +1,4 @@
-From 3c8b3c067ec7aaa8387ea670ca0c3c60834a9e43 Mon Sep 17 00:00:00 2001
+From 8f788cb1583f9ec8670b4224e62c3cb43dea6ebe Mon Sep 17 00:00:00 2001
 From: Artur Bodera <abodera@gmail.com>
 Date: Wed, 8 Apr 2026 14:55:01 +1000
 Subject: [PATCH] feat(sandbox): restore no-new-privileges override
@@ -19,7 +19,7 @@ Subject: [PATCH] feat(sandbox): restore no-new-privileges override
  12 files changed, 181 insertions(+), 1 deletion(-)
 
 diff --git a/src/agents/sandbox-create-args.test.ts b/src/agents/sandbox-create-args.test.ts
-index 4f5fae4b9b..2d773b7bbd 100644
+index 4f5fae4b9be..2d773b7bbd6 100644
 --- a/src/agents/sandbox-create-args.test.ts
 +++ b/src/agents/sandbox-create-args.test.ts
 @@ -137,6 +137,21 @@ describe("buildSandboxCreateArgs", () => {
@@ -45,7 +45,7 @@ index 4f5fae4b9b..2d773b7bbd 100644
      const cfg = createSandboxConfig({
        env: {
 diff --git a/src/agents/sandbox/config-hash.test.ts b/src/agents/sandbox/config-hash.test.ts
-index 7defa48e6d..f63b496a29 100644
+index 7defa48e6da..f63b496a299 100644
 --- a/src/agents/sandbox/config-hash.test.ts
 +++ b/src/agents/sandbox/config-hash.test.ts
 @@ -85,6 +85,24 @@ describe("computeSandboxConfigHash", () => {
@@ -74,7 +74,7 @@ index 7defa48e6d..f63b496a29 100644
      const shared = {
        workspaceAccess: "rw" as const,
 diff --git a/src/agents/sandbox/config.ts b/src/agents/sandbox/config.ts
-index d8688a801f..27b8ea67f9 100644
+index d8688a801ff..27b8ea67f94 100644
 --- a/src/agents/sandbox/config.ts
 +++ b/src/agents/sandbox/config.ts
 @@ -32,6 +32,7 @@ export const DANGEROUS_SANDBOX_DOCKER_BOOLEAN_KEYS = [
@@ -86,10 +86,10 @@ index d8688a801f..27b8ea67f9 100644
  
  const DEFAULT_SANDBOX_SSH_COMMAND = "ssh";
 diff --git a/src/agents/sandbox/docker.config-hash-recreate.test.ts b/src/agents/sandbox/docker.config-hash-recreate.test.ts
-index 4242ab8c57..00ec2c8110 100644
+index 290b0334667..d291839ba62 100644
 --- a/src/agents/sandbox/docker.config-hash-recreate.test.ts
 +++ b/src/agents/sandbox/docker.config-hash-recreate.test.ts
-@@ -314,6 +314,62 @@ describe("ensureSandboxContainer config-hash recreation", () => {
+@@ -306,6 +306,62 @@ describe("ensureSandboxContainer config-hash recreation", () => {
      },
    );
  
@@ -153,10 +153,10 @@ index 4242ab8c57..00ec2c8110 100644
      const workspaceDir = "/tmp/workspace";
      const cfg = createSandboxConfig([]);
 diff --git a/src/agents/sandbox/docker.ts b/src/agents/sandbox/docker.ts
-index ce7477531b..90fb5e9d80 100644
+index 597e749965e..c7556536b72 100644
 --- a/src/agents/sandbox/docker.ts
 +++ b/src/agents/sandbox/docker.ts
-@@ -413,7 +413,9 @@ export function buildSandboxCreateArgs(params: {
+@@ -438,7 +438,9 @@ export function buildSandboxCreateArgs(params: {
    for (const cap of params.cfg.capDrop) {
      args.push("--cap-drop", cap);
    }
@@ -168,10 +168,10 @@ index ce7477531b..90fb5e9d80 100644
      args.push("--security-opt", `seccomp=${params.cfg.seccompProfile}`);
    }
 diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
-index 35d7646bfd..972d47c20b 100644
+index d53ce928333..2b468090fb6 100644
 --- a/src/config/schema.help.ts
 +++ b/src/config/schema.help.ts
-@@ -422,6 +422,10 @@ export const FIELD_HELP: Record<string, string> = {
+@@ -442,6 +442,10 @@ export const FIELD_HELP: Record<string, string> = {
      "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
    "agents.list[].sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
      "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
@@ -183,10 +183,10 @@ index 35d7646bfd..972d47c20b 100644
      'Optional Docker GPU passthrough value passed to --gpus, for example "all" or "device=GPU-uuid". Requires a compatible host runtime such as NVIDIA Container Toolkit.',
    "agents.list[].sandbox.docker.gpus":
 diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
-index b3a064bb47..1f00b0f537 100644
+index ac38254f107..529bed7478d 100644
 --- a/src/config/schema.labels.ts
 +++ b/src/config/schema.labels.ts
-@@ -635,6 +635,8 @@ export const FIELD_LABELS: Record<string, string> = {
+@@ -646,6 +646,8 @@ export const FIELD_LABELS: Record<string, string> = {
    "agents.defaults.sandbox.browser.cdpSourceRange": "Sandbox Browser CDP Source Port Range",
    "agents.defaults.sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
      "Sandbox Docker Allow Container Namespace Join",
@@ -195,7 +195,7 @@ index b3a064bb47..1f00b0f537 100644
    "agents.defaults.sandbox.docker.gpus": "Sandbox Docker GPUs",
    commands: "Commands",
    "commands.native": "Native Commands",
-@@ -885,6 +887,8 @@ export const FIELD_LABELS: Record<string, string> = {
+@@ -900,6 +902,8 @@ export const FIELD_LABELS: Record<string, string> = {
    "agents.list[].sandbox.browser.cdpSourceRange": "Agent Sandbox Browser CDP Source Port Range",
    "agents.list[].sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
      "Agent Sandbox Docker Allow Container Namespace Join",
@@ -205,7 +205,7 @@ index b3a064bb47..1f00b0f537 100644
    "discovery.mdns.mode": "mDNS Discovery Mode",
    plugins: "Plugins",
 diff --git a/src/config/types.sandbox.ts b/src/config/types.sandbox.ts
-index 1a4670d3c2..f6b5d38562 100644
+index 1a4670d3c2a..f6b5d38562f 100644
 --- a/src/config/types.sandbox.ts
 +++ b/src/config/types.sandbox.ts
 @@ -61,6 +61,11 @@ export type SandboxDockerSettings = {
@@ -221,10 +221,10 @@ index 1a4670d3c2..f6b5d38562 100644
  
  export type SandboxBrowserSettings = {
 diff --git a/src/config/zod-schema.agent-runtime.ts b/src/config/zod-schema.agent-runtime.ts
-index 5783791020..1bd5ed13a6 100644
+index c1c88c79521..18957b20964 100644
 --- a/src/config/zod-schema.agent-runtime.ts
 +++ b/src/config/zod-schema.agent-runtime.ts
-@@ -143,6 +143,7 @@ export const SandboxDockerSchema = z
+@@ -144,6 +144,7 @@ const SandboxDockerSchema = z
      dangerouslyAllowReservedContainerTargets: z.boolean().optional(),
      dangerouslyAllowExternalBindSources: z.boolean().optional(),
      dangerouslyAllowContainerNamespaceJoin: z.boolean().optional(),
@@ -233,10 +233,10 @@ index 5783791020..1bd5ed13a6 100644
    .strict()
    .superRefine((data, ctx) => {
 diff --git a/src/security/audit-extra.sync.ts b/src/security/audit-extra.sync.ts
-index 85264a9049..c555980de6 100644
+index d99e879f1e9..a9e10c08682 100644
 --- a/src/security/audit-extra.sync.ts
 +++ b/src/security/audit-extra.sync.ts
-@@ -840,6 +840,20 @@ export function collectSandboxDangerousConfigFindings(cfg: OpenClawConfig): Secu
+@@ -789,6 +789,20 @@ export function collectSandboxDangerousConfigFindings(cfg: OpenClawConfig): Secu
          remediation: `Remove ${source}.apparmorProfile or use a named AppArmor profile.`,
        });
      }
@@ -258,7 +258,7 @@ index 85264a9049..c555980de6 100644
  
    // CDP source range is now auto-derived at runtime from the Docker network gateway
 diff --git a/src/security/audit-sandbox-docker-config.test.ts b/src/security/audit-sandbox-docker-config.test.ts
-index 5eb631bd8f..0b7a3751b9 100644
+index 5eb631bd8f8..0b7a3751b98 100644
 --- a/src/security/audit-sandbox-docker-config.test.ts
 +++ b/src/security/audit-sandbox-docker-config.test.ts
 @@ -148,6 +148,28 @@ describe("security audit sandbox docker config", () => {
@@ -291,7 +291,7 @@ index 5eb631bd8f..0b7a3751b9 100644
  
        await Promise.all(
 diff --git a/src/security/dangerous-config-flags.test.ts b/src/security/dangerous-config-flags.test.ts
-index bd14bf2ba1..a93eb16b21 100644
+index bd14bf2ba13..a93eb16b211 100644
 --- a/src/security/dangerous-config-flags.test.ts
 +++ b/src/security/dangerous-config-flags.test.ts
 @@ -37,6 +37,44 @@ describe("collectEnabledInsecureOrDangerousFlags", () => {

@@ -1,44 +1,49 @@
-From 953c2165de3f1b5cd5f4f37ac650513e82f956d9 Mon Sep 17 00:00:00 2001
+From f86a326f706bd0173d4bd7950fdfe8c77c1db8f3 Mon Sep 17 00:00:00 2001
 From: Artur Bodera <abodera@gmail.com>
 Date: Wed, 22 Apr 2026 10:21:42 +1000
-Subject: [PATCH] chore(release-sync): refresh session-write-lock patch for
- v2026.4.26 base
+Subject: [PATCH] feat(config): make session write-lock backoff params configurable
 
 The upstream v2026.4.26 release introduced orphan lock payload handling
 in session-write-lock.ts. Refresh the write-lock config patch so it
 applies cleanly on top of that upstream layout without losing either
 behavior set.
 ---
- src/agents/session-write-lock.test.ts | 52 +++++++++++++++++++++++
- src/agents/session-write-lock.ts      | 61 ++++++++++++++++++++++++++-
- src/config/schema.base.generated.ts   | 51 ++++++++++++++++++++++
- src/config/schema.help.ts             | 10 +++++
- src/config/schema.labels.ts           |  5 +++
+ src/agents/session-write-lock.test.ts | 54 +++++++++++++++++++++++++
+ src/agents/session-write-lock.ts      | 58 ++++++++++++++++++++++++++-
  src/config/types.base.ts              | 13 ++++++
- src/config/zod-schema.session.ts      |  9 ++++
- 7 files changed, 199 insertions(+), 2 deletions(-)
+ src/config/zod-schema.session.ts      |  9 +++++
+ 4 files changed, 132 insertions(+), 2 deletions(-)
 
 diff --git a/src/agents/session-write-lock.test.ts b/src/agents/session-write-lock.test.ts
-index 019fbddcb3..94b679b4ea 100644
+index 9893047a113..91c3ce1ff9e 100644
 --- a/src/agents/session-write-lock.test.ts
 +++ b/src/agents/session-write-lock.test.ts
-@@ -9,6 +9,7 @@ let acquireSessionWriteLock: typeof import("./session-write-lock.js").acquireSes
- let cleanStaleLockFiles: typeof import("./session-write-lock.js").cleanStaleLockFiles;
+@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
+ import os from "node:os";
+ import path from "node:path";
+ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
++import { loadConfig } from "../config/config.js";
++import { withTempHome, writeOpenClawConfig } from "../config/test-helpers.js";
+ 
+ const FAKE_STARTTIME = 12345;
+ let __testing: typeof import("./session-write-lock.js").__testing;
+@@ -10,6 +12,7 @@ let cleanStaleLockFiles: typeof import("./session-write-lock.js").cleanStaleLock
  let resetSessionWriteLockStateForTest: typeof import("./session-write-lock.js").resetSessionWriteLockStateForTest;
  let resolveSessionLockMaxHoldFromTimeout: typeof import("./session-write-lock.js").resolveSessionLockMaxHoldFromTimeout;
+ let resolveSessionWriteLockAcquireTimeoutMs: typeof import("./session-write-lock.js").resolveSessionWriteLockAcquireTimeoutMs;
 +let resolveSessionWriteLockConfig: typeof import("./session-write-lock.js").resolveSessionWriteLockConfig;
  
  vi.mock("../shared/pid-alive.js", async () => {
    const original =
-@@ -133,6 +134,7 @@ describe("acquireSessionWriteLock", () => {
-       cleanStaleLockFiles,
+@@ -135,6 +138,7 @@ describe("acquireSessionWriteLock", () => {
        resetSessionWriteLockStateForTest,
        resolveSessionLockMaxHoldFromTimeout,
+       resolveSessionWriteLockAcquireTimeoutMs,
 +      resolveSessionWriteLockConfig,
      } = await import("./session-write-lock.js"));
    });
  
-@@ -540,3 +542,53 @@ describe("acquireSessionWriteLock", () => {
+@@ -605,3 +609,53 @@ describe("acquireSessionWriteLock", () => {
      }
    });
  });
@@ -93,7 +98,7 @@ index 019fbddcb3..94b679b4ea 100644
 +  });
 +});
 diff --git a/src/agents/session-write-lock.ts b/src/agents/session-write-lock.ts
-index c318243e90..0cb5b00fc7 100644
+index e15e812c4e0..cc194c36894 100644
 --- a/src/agents/session-write-lock.ts
 +++ b/src/agents/session-write-lock.ts
 @@ -1,6 +1,7 @@
@@ -104,18 +109,17 @@ index c318243e90..0cb5b00fc7 100644
  import { getProcessStartTime, isPidAlive } from "../shared/pid-alive.js";
  import { resolveProcessScopedMap } from "../shared/process-scoped-map.js";
  import { SessionWriteLockTimeoutError } from "./session-write-lock-error.js";
-@@ -53,6 +54,10 @@ const DEFAULT_TIMEOUT_GRACE_MS = 2 * 60 * 1000;
+@@ -54,6 +55,9 @@ const DEFAULT_TIMEOUT_GRACE_MS = 2 * 60 * 1000;
  // A payload-less lock can be left behind if shutdown lands between open("wx")
  // and the owner metadata write. Keep the grace short so 10s callers recover.
  const ORPHAN_LOCK_PAYLOAD_GRACE_MS = 5_000;
-+const DEFAULT_SESSION_LOCK_TIMEOUT_MS = 10_000;
 +const DEFAULT_SESSION_LOCK_BACKOFF_BASE_MS = 50;
 +const DEFAULT_SESSION_LOCK_BACKOFF_CAP_MS = 1_000;
 +const DEFAULT_SESSION_LOCK_BACKOFF_JITTER_MS = 0;
  const MAX_LOCK_HOLD_MS = 2_147_000_000;
  
  type CleanupState = {
-@@ -61,6 +66,50 @@ type CleanupState = {
+@@ -62,6 +66,50 @@ type CleanupState = {
    cleanupHandlers: Map<CleanupSignal, () => void>;
  };
  
@@ -146,7 +150,7 @@ index c318243e90..0cb5b00fc7 100644
 +      ? Math.floor(backoffJitterMsRaw)
 +      : DEFAULT_SESSION_LOCK_BACKOFF_JITTER_MS;
 +  return {
-+    timeoutMs: resolvePositiveMs(writeLock?.timeoutMs, DEFAULT_SESSION_LOCK_TIMEOUT_MS, {
++    timeoutMs: resolvePositiveMs(writeLock?.acquireTimeoutMs, DEFAULT_SESSION_WRITE_LOCK_ACQUIRE_TIMEOUT_MS, {
 +      allowInfinity: true,
 +    }),
 +    backoffBaseMs,
@@ -166,19 +170,17 @@ index c318243e90..0cb5b00fc7 100644
  type WatchdogState = {
    started: boolean;
    intervalMs: number;
-@@ -509,7 +558,10 @@ export async function acquireSessionWriteLock(params: {
+@@ -582,7 +630,8 @@ export async function acquireSessionWriteLock(params: {
  }> {
    registerCleanupHandlers();
    const allowReentrant = params.allowReentrant ?? false;
--  const timeoutMs = resolvePositiveMs(params.timeoutMs, 10_000, { allowInfinity: true });
+-  const timeoutMs = resolvePositiveMs(params.timeoutMs, resolveSessionWriteLockAcquireTimeoutMs(), {
 +  const configuredLock = readSessionWriteLockConfig();
 +  const timeoutMs = resolvePositiveMs(params.timeoutMs, configuredLock.timeoutMs, {
-+    allowInfinity: true,
-+  });
+     allowInfinity: true,
+   });
    const staleMs = resolvePositiveMs(params.staleMs, DEFAULT_STALE_MS);
-   const maxHoldMs = resolvePositiveMs(params.maxHoldMs, DEFAULT_MAX_HOLD_MS);
-   const sessionFile = path.resolve(params.sessionFile);
-@@ -610,7 +662,12 @@ export async function acquireSessionWriteLock(params: {
+@@ -672,7 +721,12 @@ export async function acquireSessionWriteLock(params: {
        if (remainingMs <= 0) {
          break;
        }
@@ -192,119 +194,13 @@ index c318243e90..0cb5b00fc7 100644
        await new Promise((r) => setTimeout(r, delay));
      }
    }
-diff --git a/src/config/schema.base.generated.ts b/src/config/schema.base.generated.ts
-index 399c89a506..ef1f0e9b11 100644
---- a/src/config/schema.base.generated.ts
-+++ b/src/config/schema.base.generated.ts
-@@ -20621,6 +20621,32 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-             description:
-               "Shared defaults for thread-bound session routing behavior across providers that support thread focus workflows. Configure global defaults here and override per channel only when behavior differs.",
-           },
-+          writeLock: {
-+            type: "object",
-+            properties: {
-+              timeoutMs: {
-+                type: "integer",
-+                exclusiveMinimum: 0,
-+                maximum: 9007199254740991,
-+              },
-+              backoffBaseMs: {
-+                type: "integer",
-+                exclusiveMinimum: 0,
-+                maximum: 9007199254740991,
-+              },
-+              backoffCapMs: {
-+                type: "integer",
-+                exclusiveMinimum: 0,
-+                maximum: 9007199254740991,
-+              },
-+              backoffJitterMs: {
-+                type: "integer",
-+                minimum: 0,
-+                maximum: 9007199254740991,
-+              },
-+            },
-+            additionalProperties: false,
-+          },
-           maintenance: {
-             type: "object",
-             properties: {
-@@ -27466,6 +27492,31 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-       help: "Optional hard max age in hours for thread-bound sessions across providers/channels (0 disables hard cap). Default: 0.",
-       tags: ["performance", "storage"],
-     },
-+    "session.writeLock": {
-+      label: "Session Write Lock",
-+      help: "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
-+      tags: ["storage"],
-+    },
-+    "session.writeLock.timeoutMs": {
-+      label: "Session Write Lock Timeout (ms)",
-+      help: "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
-+      tags: ["performance", "storage"],
-+    },
-+    "session.writeLock.backoffBaseMs": {
-+      label: "Session Write Lock Backoff Base (ms)",
-+      help: "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
-+      tags: ["reliability", "storage"],
-+    },
-+    "session.writeLock.backoffCapMs": {
-+      label: "Session Write Lock Backoff Cap (ms)",
-+      help: "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
-+      tags: ["reliability", "storage"],
-+    },
-+    "session.writeLock.backoffJitterMs": {
-+      label: "Session Write Lock Backoff Jitter (ms)",
-+      help: "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
-+      tags: ["reliability", "storage"],
-+    },
-     "session.maintenance": {
-       label: "Session Maintenance",
-       help: "Automatic session-store maintenance controls for pruning age, entry caps, and file rotation behavior. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
-diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
-index 70ac8b3ac9..cf05f7c7cb 100644
---- a/src/config/schema.help.ts
-+++ b/src/config/schema.help.ts
-@@ -1415,6 +1415,16 @@ export const FIELD_HELP: Record<string, string> = {
-     "Default inactivity window in hours for thread-bound sessions across providers/channels (0 disables idle auto-unfocus). Default: 24.",
-   "session.threadBindings.maxAgeHours":
-     "Optional hard max age in hours for thread-bound sessions across providers/channels (0 disables hard cap). Default: 0.",
-+  "session.writeLock":
-+    "Controls default session write-lock acquisition timeout and retry backoff when multiple operations contend on the same lock file. Keep upstream defaults unless you are tuning behavior for slow or bursty filesystems.",
-+  "session.writeLock.timeoutMs":
-+    "Default lock acquisition timeout in milliseconds when callers do not pass an explicit timeout. Default: 10000; increase only when legitimate contention exceeds the stock budget.",
-+  "session.writeLock.backoffBaseMs":
-+    "Linear retry backoff base in milliseconds for contended lock acquisition. Default: 50; lower values retry more aggressively, while higher values reduce churn at the cost of longer tail waits.",
-+  "session.writeLock.backoffCapMs":
-+    "Maximum retry backoff delay in milliseconds for contended lock acquisition. Default: 1000; lower caps improve fairness under bursts, while higher caps reduce retry pressure on slow filesystems.",
-+  "session.writeLock.backoffJitterMs":
-+    "Optional additive random jitter in milliseconds for contended lock retries. Default: 0; set a small jitter to reduce herd effects when many waiters wake up on the same schedule.",
-   "session.maintenance":
-     "Automatic session-store maintenance controls for pruning age, entry caps, and file rotation behavior. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
-   "session.maintenance.mode":
-diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
-index 5927605ceb..c892493769 100644
---- a/src/config/schema.labels.ts
-+++ b/src/config/schema.labels.ts
-@@ -704,6 +704,11 @@ export const FIELD_LABELS: Record<string, string> = {
-   "session.threadBindings.enabled": "Thread Binding Enabled",
-   "session.threadBindings.idleHours": "Thread Binding Idle Timeout (hours)",
-   "session.threadBindings.maxAgeHours": "Thread Binding Max Age (hours)",
-+  "session.writeLock": "Session Write Lock Tuning",
-+  "session.writeLock.timeoutMs": "Write Lock Timeout (ms)",
-+  "session.writeLock.backoffBaseMs": "Write Lock Backoff Base (ms)",
-+  "session.writeLock.backoffCapMs": "Write Lock Backoff Cap (ms)",
-+  "session.writeLock.backoffJitterMs": "Write Lock Backoff Jitter (ms)",
-   "session.maintenance": "Session Maintenance",
-   "session.maintenance.mode": "Session Maintenance Mode",
-   "session.maintenance.pruneAfter": "Session Prune After",
 diff --git a/src/config/types.base.ts b/src/config/types.base.ts
-index 8c5bcf945b..2a40f9c15c 100644
+index bb38356f3d3..06e8f86f7ca 100644
 --- a/src/config/types.base.ts
 +++ b/src/config/types.base.ts
-@@ -186,6 +186,19 @@ export type SessionConfig = {
+@@ -205,6 +205,19 @@ export type SessionConfig = {
    threadBindings?: SessionThreadBindingsConfig;
-   /** Automatic session store maintenance (pruning, capping, file rotation). */
+   /** Automatic session store maintenance (pruning, capping, archive retention, disk budget). */
    maintenance?: SessionMaintenanceConfig;
 +  /** Tuning for the session file write-lock retry behaviour (backoff, timeout, jitter). */
 +  writeLock?: SessionWriteLockConfig;
@@ -321,12 +217,12 @@ index 8c5bcf945b..2a40f9c15c 100644
 +  backoffJitterMs?: number;
  };
  
- export type SessionMaintenanceMode = "enforce" | "warn";
+ export type SessionWriteLockConfig = {
 diff --git a/src/config/zod-schema.session.ts b/src/config/zod-schema.session.ts
-index a6f657dc00..4c67a6d1d4 100644
+index e9bb3befa91..bd162aa7029 100644
 --- a/src/config/zod-schema.session.ts
 +++ b/src/config/zod-schema.session.ts
-@@ -151,6 +151,15 @@ export const SessionSchema = z
+@@ -146,6 +146,15 @@ export const SessionSchema = z
          }
        })
        .optional(),
