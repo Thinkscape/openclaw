@@ -1,18 +1,18 @@
-From 5cab738bc1767983a8554203f0455d7c1b97c019 Mon Sep 17 00:00:00 2001
+From 71e22b95b939b0877155afb042eb469a8205b598 Mon Sep 17 00:00:00 2001
 From: Artur Bodera <abodera@gmail.com>
 Date: Wed, 8 Apr 2026 14:48:15 +1000
 Subject: [PATCH] feat(config): make subagent spawn self-call timeout
  configurable
 
 ---
- src/agents/subagent-spawn.ts                  | 27 ++++++++--
- .../config.agent-concurrency-defaults.test.ts |  4 +-
- src/config/types.agent-defaults.ts            |  5 ++
- src/config/zod-schema.agent-defaults.ts       |  8 +++
+ src/agents/subagent-spawn.ts                  | 27 +++++++++++++++----
+ .../config.agent-concurrency-defaults.test.ts |  4 ++-
+ src/config/types.agent-defaults.ts            |  5 ++++
+ src/config/zod-schema.agent-defaults.ts       |  8 ++++++
  4 files changed, 38 insertions(+), 6 deletions(-)
 
 diff --git a/src/agents/subagent-spawn.ts b/src/agents/subagent-spawn.ts
-index eed7fef2e2d..ebce77a98d0 100644
+index eed7fef2e2d..d46716f43c1 100644
 --- a/src/agents/subagent-spawn.ts
 +++ b/src/agents/subagent-spawn.ts
 @@ -115,6 +115,7 @@ let subagentSpawnDeps: SubagentSpawnDeps = defaultSubagentSpawnDeps;
