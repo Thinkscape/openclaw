@@ -1,20 +1,21 @@
-From c5e77c2fb3101d6b6c812cb98a0b1c93d2902e26 Mon Sep 17 00:00:00 2001
-From: Artur Bodera <abodera@gmail.com>
-Date: Wed, 8 Apr 2026 14:48:15 +1000
-Subject: [PATCH] config(subagents): make spawn self-call timeout configurable
+From 8c5ad1c7fee7259ae8a48383596276791c516a31 Mon Sep 17 00:00:00 2001
+From: Test User <test@example.com>
+Date: Tue, 5 May 2026 11:31:59 +1000
+Subject: [PATCH] feat(config): make subagent spawn self-call timeout
+ configurable
 
 ---
  ...nts.sessions-spawn-gateway-timeout.test.ts | 49 +++++++++++++++++++
- src/agents/subagent-spawn.ts                  | 28 ++++++++---
- .../config.agent-concurrency-defaults.test.ts |  2 +
+ src/agents/subagent-spawn.ts                  | 27 ++++++++--
+ .../config.agent-concurrency-defaults.test.ts |  4 +-
  src/config/types.agent-defaults.ts            |  5 ++
  src/config/zod-schema.agent-defaults.ts       |  8 +++
- 5 files changed, 86 insertions(+), 6 deletions(-)
+ 5 files changed, 87 insertions(+), 6 deletions(-)
  create mode 100644 src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts
 
 diff --git a/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts b/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts
 new file mode 100644
-index 0000000000..6c0c4acc07
+index 0000000000..c9b6f29572
 --- /dev/null
 +++ b/src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts
 @@ -0,0 +1,49 @@
@@ -61,56 +62,26 @@ index 0000000000..6c0c4acc07
 +
 +    await spawnSubagent("call-timeout", { task: "hello" });
 +
-+    // v2026.4.25 writes child-session metadata directly to the session store,
++    // v2026.5.x writes child-session metadata directly to the session store,
 +    // so the configurable timeout is only observable on the gateway agent self-call.
 +    expect(getGatewayCallTimeouts(gateway.calls, "sessions.patch")).toEqual([]);
 +    expect(getGatewayCallTimeouts(gateway.calls, "agent")).toEqual([30_000]);
 +  });
 +});
 diff --git a/src/agents/subagent-spawn.ts b/src/agents/subagent-spawn.ts
-index 7c6f1f52e6..40dbdf0a03 100644
+index eed7fef2e2..ebce77a98d 100644
 --- a/src/agents/subagent-spawn.ts
 +++ b/src/agents/subagent-spawn.ts
-@@ -149,6 +149,8 @@ export type SpawnSubagentContext = {
-   workspaceDir?: string;
- };
- 
+@@ -115,6 +115,7 @@ let subagentSpawnDeps: SubagentSpawnDeps = defaultSubagentSpawnDeps;
+ const SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS = 60_000;
+ const DEFAULT_SUBAGENT_AGENT_GATEWAY_TIMEOUT_MS = 60_000;
+ const MAX_SUBAGENT_AGENT_GATEWAY_TIMEOUT_MS = 300_000;
 +const MAX_TIMER_SAFE_TIMEOUT_MS = 2_147_000_000;
-+
- export type SpawnSubagentResult = {
-   status: "accepted" | "forbidden" | "error";
-   childSessionKey?: string;
-@@ -470,6 +472,7 @@ async function cleanupProvisionalSession(
-   options?: {
-     emitLifecycleHooks?: boolean;
-     deleteTranscript?: boolean;
-+    gatewayTimeoutMs?: number;
-   },
- ): Promise<void> {
-   try {
-@@ -480,7 +483,7 @@ async function cleanupProvisionalSession(
-         emitLifecycleHooks: options?.emitLifecycleHooks === true,
-         deleteTranscript: options?.deleteTranscript === true,
-       },
--      timeoutMs: SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
-+      timeoutMs: options?.gatewayTimeoutMs ?? SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
-     });
-   } catch {
-     // Best-effort cleanup only.
-@@ -492,6 +495,7 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
-   attachmentAbsDir?: string;
-   emitLifecycleHooks?: boolean;
-   deleteTranscript?: boolean;
-+  gatewayTimeoutMs?: number;
- }): Promise<void> {
-   if (params.attachmentAbsDir) {
-     try {
-@@ -503,9 +507,18 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
-   await cleanupProvisionalSession(params.childSessionKey, {
-     emitLifecycleHooks: params.emitLifecycleHooks,
-     deleteTranscript: params.deleteTranscript,
-+    gatewayTimeoutMs: params.gatewayTimeoutMs,
-   });
+ 
+ export type SpawnSubagentParams = {
+   task: string;
+@@ -261,6 +262,14 @@ function loadSubagentConfig() {
+   return subagentSpawnDeps.getRuntimeConfig();
  }
  
 +export function resolveSubagentGatewayTimeoutMs(cfg: ReturnType<typeof loadConfig>): number | undefined {
@@ -121,10 +92,43 @@ index 7c6f1f52e6..40dbdf0a03 100644
 +  return Math.min(Math.max(1, Math.floor(configured)), MAX_TIMER_SAFE_TIMEOUT_MS);
 +}
 +
- function resolveSpawnMode(params: {
-   requestedMode?: SpawnSubagentMode;
-   threadRequested: boolean;
-@@ -671,6 +684,7 @@ export async function spawnSubagentDirect(
+ async function persistInitialChildSessionRuntimeModel(params: {
+   cfg: OpenClawConfig;
+   childSessionKey: string;
+@@ -500,6 +509,7 @@ async function cleanupProvisionalSession(
+   options?: {
+     emitLifecycleHooks?: boolean;
+     deleteTranscript?: boolean;
++    gatewayTimeoutMs?: number;
+   },
+ ): Promise<void> {
+   try {
+@@ -510,7 +520,7 @@ async function cleanupProvisionalSession(
+         emitLifecycleHooks: options?.emitLifecycleHooks === true,
+         deleteTranscript: options?.deleteTranscript === true,
+       },
+-      timeoutMs: SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
++      timeoutMs: options?.gatewayTimeoutMs ?? SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
+     });
+   } catch {
+     // Best-effort cleanup only.
+@@ -522,6 +532,7 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
+   attachmentAbsDir?: string;
+   emitLifecycleHooks?: boolean;
+   deleteTranscript?: boolean;
++  gatewayTimeoutMs?: number;
+ }): Promise<void> {
+   if (params.attachmentAbsDir) {
+     try {
+@@ -533,6 +544,7 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
+   await cleanupProvisionalSession(params.childSessionKey, {
+     emitLifecycleHooks: params.emitLifecycleHooks,
+     deleteTranscript: params.deleteTranscript,
++    gatewayTimeoutMs: params.gatewayTimeoutMs,
+   });
+ }
+ 
+@@ -723,6 +735,7 @@ export async function spawnSubagentDirect(
      cfg,
      runTimeoutSeconds: params.runTimeoutSeconds,
    });
@@ -132,7 +136,15 @@ index 7c6f1f52e6..40dbdf0a03 100644
    let modelApplied = false;
    let threadBindingReady = false;
    let hasBoundThreadDeliveryOrigin = false;
-@@ -869,7 +883,7 @@ export async function spawnSubagentDirect(
+@@ -914,6 +927,7 @@ export async function spawnSubagentDirect(
+     await cleanupProvisionalSession(childSessionKey, {
+       emitLifecycleHooks: false,
+       deleteTranscript: true,
++      gatewayTimeoutMs: subagentGatewayTimeoutMs,
+     });
+     return {
+       status: "error",
+@@ -932,7 +946,7 @@ export async function spawnSubagentDirect(
          await callSubagentGateway({
            method: "sessions.delete",
            params: { key: childSessionKey, emitLifecycleHooks: false },
@@ -141,16 +153,16 @@ index 7c6f1f52e6..40dbdf0a03 100644
          });
        } catch {
          // Best-effort cleanup only.
-@@ -902,7 +916,7 @@ export async function spawnSubagentDirect(
+@@ -965,7 +979,7 @@ export async function spawnSubagentDirect(
          await callSubagentGateway({
            method: "sessions.delete",
-           params: { key: childSessionKey, emitLifecycleHooks: false },
+           params: { key: childSessionKey, deleteTranscript: true, emitLifecycleHooks: false },
 -          timeoutMs: SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
 +          timeoutMs: subagentGatewayTimeoutMs ?? SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS,
          });
        } catch {
          // Best-effort cleanup only.
-@@ -956,6 +970,7 @@ export async function spawnSubagentDirect(
+@@ -1019,6 +1033,7 @@ export async function spawnSubagentDirect(
      await cleanupProvisionalSession(childSessionKey, {
        emitLifecycleHooks: threadBindingReady,
        deleteTranscript: true,
@@ -158,7 +170,7 @@ index 7c6f1f52e6..40dbdf0a03 100644
      });
      return {
        status: materializedAttachments.status,
-@@ -1012,6 +1027,7 @@ export async function spawnSubagentDirect(
+@@ -1071,6 +1086,7 @@ export async function spawnSubagentDirect(
        attachmentAbsDir,
        emitLifecycleHooks: threadBindingReady,
        deleteTranscript: true,
@@ -166,16 +178,15 @@ index 7c6f1f52e6..40dbdf0a03 100644
      });
      return {
        status: "error",
-@@ -1080,7 +1096,7 @@ export async function spawnSubagentDirect(
-           : {}),
-         ...publicSpawnedMetadata,
-       },
--      timeoutMs: resolveSubagentAgentGatewayTimeoutMs(runTimeoutSeconds),
-+      timeoutMs: subagentGatewayTimeoutMs ?? resolveSubagentAgentGatewayTimeoutMs(runTimeoutSeconds),
+@@ -1091,6 +1107,7 @@ export async function spawnSubagentDirect(
+       attachmentAbsDir,
+       emitLifecycleHooks: threadBindingReady,
+       deleteTranscript: true,
++      gatewayTimeoutMs: subagentGatewayTimeoutMs,
      });
-     const runId = readGatewayRunId(response);
-     if (runId) {
-@@ -1135,7 +1151,7 @@ export async function spawnSubagentDirect(
+     return {
+       status: "error",
+@@ -1196,7 +1213,7 @@ export async function spawnSubagentDirect(
            deleteTranscript: true,
            emitLifecycleHooks,
          },
@@ -184,7 +195,7 @@ index 7c6f1f52e6..40dbdf0a03 100644
        });
      } catch {
        // Best-effort only.
-@@ -1186,7 +1202,7 @@ export async function spawnSubagentDirect(
+@@ -1248,7 +1265,7 @@ export async function spawnSubagentDirect(
            deleteTranscript: true,
            emitLifecycleHooks: threadBindingReady,
          },
@@ -194,10 +205,18 @@ index 7c6f1f52e6..40dbdf0a03 100644
      } catch {
        // Best-effort cleanup only.
 diff --git a/src/config/config.agent-concurrency-defaults.test.ts b/src/config/config.agent-concurrency-defaults.test.ts
-index f5bda63b0e..0b019a2560 100644
+index f5bda63b0e..5f66348050 100644
 --- a/src/config/config.agent-concurrency-defaults.test.ts
 +++ b/src/config/config.agent-concurrency-defaults.test.ts
-@@ -34,6 +34,7 @@ describe("agent concurrency defaults", () => {
+@@ -27,13 +27,14 @@ describe("agent concurrency defaults", () => {
+     expect(resolveSubagentMaxConcurrent(cfg)).toBe(1);
+   });
+ 
+-  it("accepts subagent spawn depth and per-agent child limits", () => {
++  it("accepts subagent spawn depth, child limits and gateway timeout", () => {
+     const parsed = OpenClawSchema.parse({
+       agents: {
+         defaults: {
            subagents: {
              maxSpawnDepth: 2,
              maxChildrenPerAgent: 7,
@@ -214,10 +233,10 @@ index f5bda63b0e..0b019a2560 100644
  
    it("injects missing agent defaults", () => {
 diff --git a/src/config/types.agent-defaults.ts b/src/config/types.agent-defaults.ts
-index 5ec5e9606d..10a397283f 100644
+index 08b847cc59..a728cf1f94 100644
 --- a/src/config/types.agent-defaults.ts
 +++ b/src/config/types.agent-defaults.ts
-@@ -408,6 +408,11 @@ export type AgentDefaultsConfig = {
+@@ -428,6 +428,11 @@ export type AgentDefaultsConfig = {
      thinking?: string;
      /** Default run timeout in seconds for spawned sub-agents (0 = no timeout). */
      runTimeoutSeconds?: number;
@@ -230,10 +249,10 @@ index 5ec5e9606d..10a397283f 100644
      announceTimeoutMs?: number;
      /** Require explicit agentId in sessions_spawn (no default same-as-caller). Default: false. */
 diff --git a/src/config/zod-schema.agent-defaults.ts b/src/config/zod-schema.agent-defaults.ts
-index f565ed106a..bb112d8954 100644
+index eb43b95436..bb440ce541 100644
 --- a/src/config/zod-schema.agent-defaults.ts
 +++ b/src/config/zod-schema.agent-defaults.ts
-@@ -280,6 +280,14 @@ export const AgentDefaultsSchema = z
+@@ -281,6 +281,14 @@ export const AgentDefaultsSchema = z
          model: AgentModelSchema.optional(),
          thinking: z.string().optional(),
          runTimeoutSeconds: z.number().int().min(0).optional(),
