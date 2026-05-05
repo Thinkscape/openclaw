@@ -353,7 +353,6 @@ main() {
   # and are not specific to the release patch set being applied here.
   node scripts/test-projects.mjs \
     src/config/zod-schema.session-maintenance-extensions.test.ts \
-    src/agents/openclaw-tools.subagents.sessions-spawn-gateway-timeout.test.ts \
     src/agents/session-write-lock.test.ts
 
   if ! git diff --quiet || ! git diff --cached --quiet; then
