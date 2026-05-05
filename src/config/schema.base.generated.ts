@@ -5698,6 +5698,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     minimum: 0,
                     maximum: 9007199254740991,
                   },
+                  gatewayTimeoutMs: {
+                    description:
+                      "Internal gateway timeout in milliseconds for sub-agent spawn self-calls such as sessions.patch, agent, and sessions.delete (default: 10000). Increase on slower gateways or remote filesystems that delay child acceptance.",
+                    type: "integer",
+                    exclusiveMinimum: 0,
+                    maximum: 9007199254740991,
+                  },
                   announceTimeoutMs: {
                     type: "integer",
                     exclusiveMinimum: 0,
