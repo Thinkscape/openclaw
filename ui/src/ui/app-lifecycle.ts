@@ -10,7 +10,6 @@ import {
 import { observeTopbar, scheduleChatScroll, scheduleLogsScroll } from "./app-scroll.ts";
 import {
   applySettingsFromUrl,
-  attachThemeListener,
   detachThemeListener,
   inferBasePath,
   syncTabWithLocation,
@@ -27,10 +26,21 @@ type LifecycleHost = {
   tab: Tab;
   assistantName: string;
   assistantAvatar: string | null;
+  assistantAvatarSource?: string | null;
+  assistantAvatarStatus?: "none" | "local" | "remote" | "data" | null;
+  assistantAvatarReason?: string | null;
   assistantAgentId: string | null;
   serverVersion: string | null;
+  localMediaPreviewRoots: string[];
+  embedSandboxMode: "strict" | "scripts" | "trusted";
+  allowExternalEmbedUrls: boolean;
   chatHasAutoScrolled: boolean;
   chatManualRefreshInFlight: boolean;
+  realtimeTalkSession?: { stop: () => void } | null;
+  realtimeTalkActive?: boolean;
+  realtimeTalkStatus?: string;
+  realtimeTalkDetail?: string | null;
+  realtimeTalkTranscript?: string | null;
   chatLoading: boolean;
   chatMessages: unknown[];
   chatToolMessages: unknown[];
@@ -38,6 +48,10 @@ type LifecycleHost = {
   logsAutoFollow: boolean;
   logsAtBottom: boolean;
   logsEntries: unknown[];
+  chatScrollFrame?: number | null;
+  chatScrollTimeout?: number | null;
+  logsScrollFrame?: number | null;
+  controlUiTabPaintSeq?: number;
   popStateHandler: () => void;
   topbarObserver: ResizeObserver | null;
 };
@@ -49,7 +63,6 @@ export function handleConnected(host: LifecycleHost) {
   const bootstrapReady = loadControlUiBootstrapConfig(host);
   syncTabWithLocation(host as unknown as Parameters<typeof syncTabWithLocation>[0], true);
   syncThemeWithSettings(host as unknown as Parameters<typeof syncThemeWithSettings>[0]);
-  attachThemeListener(host as unknown as Parameters<typeof attachThemeListener>[0]);
   window.addEventListener("popstate", host.popStateHandler);
   void bootstrapReady.finally(() => {
     if (host.connectGeneration !== connectGeneration) {
@@ -70,12 +83,37 @@ export function handleFirstUpdated(host: LifecycleHost) {
   observeTopbar(host as unknown as Parameters<typeof observeTopbar>[0]);
 }
 
+function cancelHostAnimationFrame(frame: number | null | undefined) {
+  if (frame != null && typeof window.cancelAnimationFrame === "function") {
+    window.cancelAnimationFrame(frame);
+  }
+}
+
+function clearHostTimeout(timeout: number | null | undefined) {
+  if (timeout != null && typeof window.clearTimeout === "function") {
+    window.clearTimeout(timeout);
+  }
+}
+
 export function handleDisconnected(host: LifecycleHost) {
   host.connectGeneration += 1;
+  host.controlUiTabPaintSeq = (host.controlUiTabPaintSeq ?? 0) + 1;
   window.removeEventListener("popstate", host.popStateHandler);
   stopNodesPolling(host as unknown as Parameters<typeof stopNodesPolling>[0]);
   stopLogsPolling(host as unknown as Parameters<typeof stopLogsPolling>[0]);
   stopDebugPolling(host as unknown as Parameters<typeof stopDebugPolling>[0]);
+  cancelHostAnimationFrame(host.chatScrollFrame);
+  host.chatScrollFrame = null;
+  cancelHostAnimationFrame(host.logsScrollFrame);
+  host.logsScrollFrame = null;
+  clearHostTimeout(host.chatScrollTimeout);
+  host.chatScrollTimeout = null;
+  host.realtimeTalkSession?.stop();
+  host.realtimeTalkSession = null;
+  host.realtimeTalkActive = false;
+  host.realtimeTalkStatus = "idle";
+  host.realtimeTalkDetail = null;
+  host.realtimeTalkTranscript = null;
   host.client?.stop();
   host.client = null;
   host.connected = false;

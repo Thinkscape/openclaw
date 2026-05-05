@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { parseByteSize } from "../cli/parse-bytes.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
+import { normalizeStringifiedOptionalString } from "../shared/string-coerce.js";
 import { ElevatedAllowFromSchema } from "./zod-schema.agent-runtime.js";
 import { createAllowDenyChannelRulesSchema } from "./zod-schema.allowdeny.js";
 import {
@@ -10,6 +11,7 @@ import {
   QueueSchema,
   TypingModeSchema,
   TtsConfigSchema,
+  VisibleRepliesSchema,
 } from "./zod-schema.core.js";
 import { sensitive } from "./zod-schema.sensitive.js";
 
@@ -52,9 +54,14 @@ export const SessionSchema = z
     store: z.string().optional(),
     typingIntervalSeconds: z.number().int().positive().optional(),
     typingMode: TypingModeSchema.optional(),
-    parentForkMaxTokens: z.number().int().nonnegative().optional(),
     mainKey: z.string().optional(),
     sendPolicy: SessionSendPolicySchema.optional(),
+    writeLock: z
+      .object({
+        acquireTimeoutMs: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
     agentToAgent: z
       .object({
         maxPingPongTurns: z.number().int().min(0).max(5).optional(),
@@ -66,30 +73,10 @@ export const SessionSchema = z
         enabled: z.boolean().optional(),
         idleHours: z.number().nonnegative().optional(),
         maxAgeHours: z.number().nonnegative().optional(),
+        spawnSessions: z.boolean().optional(),
+        defaultSpawnContext: z.enum(["isolated", "fork"]).optional(),
       })
       .strict()
-      .optional(),
-    writeLock: z
-      .object({
-        timeoutMs: z.number().int().positive().optional(),
-        backoffBaseMs: z.number().int().positive().optional(),
-        backoffCapMs: z.number().int().positive().optional(),
-        backoffJitterMs: z.number().int().nonnegative().optional(),
-      })
-      .strict()
-      .superRefine((val, ctx) => {
-        if (
-          typeof val.backoffBaseMs === "number" &&
-          typeof val.backoffCapMs === "number" &&
-          val.backoffCapMs < val.backoffBaseMs
-        ) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["backoffCapMs"],
-            message: "backoffCapMs must be greater than or equal to backoffBaseMs",
-          });
-        }
-      })
       .optional(),
     maintenance: z
       .object({
@@ -107,7 +94,9 @@ export const SessionSchema = z
       .superRefine((val, ctx) => {
         if (val.pruneAfter !== undefined) {
           try {
-            parseDurationMs(String(val.pruneAfter).trim(), { defaultUnit: "d" });
+            parseDurationMs(normalizeStringifiedOptionalString(val.pruneAfter) ?? "", {
+              defaultUnit: "d",
+            });
           } catch {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
@@ -116,20 +105,11 @@ export const SessionSchema = z
             });
           }
         }
-        if (val.rotateBytes !== undefined) {
-          try {
-            parseByteSize(String(val.rotateBytes).trim(), { defaultUnit: "b" });
-          } catch {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: ["rotateBytes"],
-              message: "invalid size (use b, kb, mb, gb, tb)",
-            });
-          }
-        }
         if (val.resetArchiveRetention !== undefined && val.resetArchiveRetention !== false) {
           try {
-            parseDurationMs(String(val.resetArchiveRetention).trim(), { defaultUnit: "d" });
+            parseDurationMs(normalizeStringifiedOptionalString(val.resetArchiveRetention) ?? "", {
+              defaultUnit: "d",
+            });
           } catch {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
@@ -140,7 +120,9 @@ export const SessionSchema = z
         }
         if (val.maxDiskBytes !== undefined) {
           try {
-            parseByteSize(String(val.maxDiskBytes).trim(), { defaultUnit: "b" });
+            parseByteSize(normalizeStringifiedOptionalString(val.maxDiskBytes) ?? "", {
+              defaultUnit: "b",
+            });
           } catch {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
@@ -151,7 +133,9 @@ export const SessionSchema = z
         }
         if (val.highWaterBytes !== undefined) {
           try {
-            parseByteSize(String(val.highWaterBytes).trim(), { defaultUnit: "b" });
+            parseByteSize(normalizeStringifiedOptionalString(val.highWaterBytes) ?? "", {
+              defaultUnit: "b",
+            });
           } catch {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
@@ -169,6 +153,7 @@ export const SessionSchema = z
 export const MessagesSchema = z
   .object({
     messagePrefix: z.string().optional(),
+    visibleReplies: VisibleRepliesSchema.optional(),
     responsePrefix: z.string().optional(),
     groupChat: GroupChatSchema,
     queue: QueueSchema,
@@ -235,5 +220,11 @@ export const CommandsSchema = z
   .strict()
   .optional()
   .default(
-    () => ({ native: "auto", nativeSkills: "auto", restart: true, ownerDisplay: "raw" }) as const,
+    () =>
+      ({
+        native: "auto",
+        nativeSkills: "auto",
+        restart: true,
+        ownerDisplay: "raw",
+      }) as const,
   );
