@@ -5824,6 +5824,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                           type: "string",
                         },
                       },
+                      dangerouslyDisableNoNewPrivileges: {
+                        type: "boolean",
+                      },
                       env: {
                         type: "object",
                         propertyNames: {
@@ -7587,6 +7590,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                           items: {
                             type: "string",
                           },
+                        },
+                        dangerouslyDisableNoNewPrivileges: {
+                          type: "boolean",
                         },
                         env: {
                           type: "object",

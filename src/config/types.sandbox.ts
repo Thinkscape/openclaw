@@ -17,6 +17,11 @@ export type SandboxDockerSettings = {
   user?: string;
   /** Drop Linux capabilities. */
   capDrop?: string[];
+  /**
+   * Dangerous override: do not set Docker no-new-privileges.
+   * This permits setuid helpers such as sudo inside the sandbox container.
+   */
+  dangerouslyDisableNoNewPrivileges?: boolean;
   /** Extra environment variables for sandbox exec. */
   env?: Record<string, string>;
   /** Optional setup command run once after container creation (array entries are joined by newline). */
