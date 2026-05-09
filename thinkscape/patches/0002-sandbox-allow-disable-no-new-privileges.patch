@@ -1,0 +1,120 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Artur Bodera <abodera@gmail.com>
+Date: Wed, 6 May 2026 12:00:00 +1000
+Subject: [PATCH] feat(sandbox): allow disabling no-new-privileges for sudo
+
+---
+ src/agents/sandbox-create-args.test.ts | 17 +++++++++++++++++
+ src/agents/sandbox/config.ts           |  1 +
+ src/agents/sandbox/docker.ts           |  4 +++-
+ src/config/schema.base.generated.ts    |  6 ++++++
+ src/config/types.sandbox.ts            |  6 ++++++
+ src/config/zod-schema.agent-runtime.ts |  1 +
+ 6 files changed, 34 insertions(+), 1 deletion(-)
+
+diff --git a/src/agents/sandbox-create-args.test.ts b/src/agents/sandbox-create-args.test.ts
+index 4f5fae4b9be..88bd1c6a976 100644
+--- a/src/agents/sandbox-create-args.test.ts
++++ b/src/agents/sandbox-create-args.test.ts
+@@ -38,6 +38,22 @@ describe("buildSandboxCreateArgs", () => {
+     ).toThrow(expectedMessage);
+   }
+ 
++  it("omits no-new-privileges only with explicit dangerous override", () => {
++    const defaultArgs = buildSandboxCreateArgs({
++      name: "openclaw-sbx-test",
++      cfg: createSandboxConfig(),
++      scopeKey: "main",
++    });
++    expect(defaultArgs).toEqual(expect.arrayContaining(["--security-opt", "no-new-privileges"]));
++
++    const overrideArgs = buildSandboxCreateArgs({
++      name: "openclaw-sbx-test",
++      cfg: createSandboxConfig({ dangerouslyDisableNoNewPrivileges: true }),
++      scopeKey: "main",
++    });
++    expect(overrideArgs).not.toContain("no-new-privileges");
++  });
++
+   it("includes hardening and resource flags", () => {
+     const cfg: SandboxDockerConfig = {
+       image: "openclaw-sandbox:bookworm-slim",
+diff --git a/src/agents/sandbox/config.ts b/src/agents/sandbox/config.ts
+index d8688a801ff..27b8ea67f94 100644
+--- a/src/agents/sandbox/config.ts
++++ b/src/agents/sandbox/config.ts
+@@ -32,6 +32,7 @@ export const DANGEROUS_SANDBOX_DOCKER_BOOLEAN_KEYS = [
+   "dangerouslyAllowReservedContainerTargets",
+   "dangerouslyAllowExternalBindSources",
+   "dangerouslyAllowContainerNamespaceJoin",
++  "dangerouslyDisableNoNewPrivileges",
+ ] as const;
+ 
+ const DEFAULT_SANDBOX_SSH_COMMAND = "ssh";
+diff --git a/src/agents/sandbox/docker.ts b/src/agents/sandbox/docker.ts
+index 597e749965e..c7556536b72 100644
+--- a/src/agents/sandbox/docker.ts
++++ b/src/agents/sandbox/docker.ts
+@@ -438,7 +438,9 @@ export function buildSandboxCreateArgs(params: {
+   for (const cap of params.cfg.capDrop) {
+     args.push("--cap-drop", cap);
+   }
+-  args.push("--security-opt", "no-new-privileges");
++  if (params.cfg.dangerouslyDisableNoNewPrivileges !== true) {
++    args.push("--security-opt", "no-new-privileges");
++  }
+   if (params.cfg.seccompProfile) {
+     args.push("--security-opt", `seccomp=${params.cfg.seccompProfile}`);
+   }
+diff --git a/src/config/schema.base.generated.ts b/src/config/schema.base.generated.ts
+index bc405d4520e..5f5bf0d1e7b 100644
+--- a/src/config/schema.base.generated.ts
++++ b/src/config/schema.base.generated.ts
+@@ -5831,6 +5831,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+                           type: "string",
+                         },
+                       },
++                      dangerouslyDisableNoNewPrivileges: {
++                        type: "boolean",
++                      },
+                       env: {
+                         type: "object",
+                         propertyNames: {
+@@ -7595,6 +7598,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
+                             type: "string",
+                           },
+                         },
++                        dangerouslyDisableNoNewPrivileges: {
++                          type: "boolean",
++                        },
+                         env: {
+                           type: "object",
+                           propertyNames: {
+diff --git a/src/config/types.sandbox.ts b/src/config/types.sandbox.ts
+index 1a4670d3c2a..a8fefec49ad 100644
+--- a/src/config/types.sandbox.ts
++++ b/src/config/types.sandbox.ts
+@@ -17,6 +17,11 @@ export type SandboxDockerSettings = {
+   user?: string;
+   /** Drop Linux capabilities. */
+   capDrop?: string[];
++  /**
++   * Dangerous override: do not set Docker no-new-privileges.
++   * This permits setuid helpers such as sudo inside the sandbox container.
++   */
++  dangerouslyDisableNoNewPrivileges?: boolean;
+   /** Extra environment variables for sandbox exec. */
+   env?: Record<string, string>;
+   /** Optional setup command run once after container creation (array entries are joined by newline). */
+diff --git a/src/config/zod-schema.agent-runtime.ts b/src/config/zod-schema.agent-runtime.ts
+index daa2f0116c2..eb864fae697 100644
+--- a/src/config/zod-schema.agent-runtime.ts
++++ b/src/config/zod-schema.agent-runtime.ts
+@@ -113,6 +113,7 @@ const SandboxDockerSchema = z
+     network: z.string().optional(),
+     user: z.string().optional(),
+     capDrop: z.array(z.string()).optional(),
++    dangerouslyDisableNoNewPrivileges: z.boolean().optional(),
+     env: z.record(z.string(), z.string()).optional(),
+     setupCommand: z
+       .union([z.string(), z.array(z.string())])
