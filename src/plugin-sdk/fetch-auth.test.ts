@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fetchWithBearerAuthScopeFallback } from "./fetch-auth.js";
+import { resolveRequestUrl } from "./request-url.js";
 
 const asFetch = (fn: unknown): typeof fetch => fn as typeof fetch;
 
@@ -113,5 +114,60 @@ describe("fetchWithBearerAuthScopeFallback", () => {
     expect(tokenProvider.getAccessToken).toHaveBeenCalledTimes(2);
     expect(tokenProvider.getAccessToken).toHaveBeenNthCalledWith(1, "https://first.example");
     expect(tokenProvider.getAccessToken).toHaveBeenNthCalledWith(2, "https://second.example");
+  });
+
+  it("normalizes symbol-bearing request headers across unauthenticated and retry attempts", async () => {
+    const headers = { Accept: "application/json" } as Record<string, string> & {
+      [key: symbol]: unknown;
+    };
+    Object.defineProperty(headers, Symbol("sensitiveHeaders"), {
+      value: new Set(["accept"]),
+      enumerable: false,
+    });
+    const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(() => new Headers(init?.headers)).not.toThrow();
+      return fetchFn.mock.calls.length === 1
+        ? new Response("unauthorized", { status: 401 })
+        : new Response("ok", { status: 200 });
+    });
+    const tokenProvider = { getAccessToken: vi.fn(async () => "token-1") };
+
+    const response = await fetchWithBearerAuthScopeFallback({
+      url: "https://graph.microsoft.com/v1.0/me",
+      scopes: ["https://graph.microsoft.com"],
+      fetchFn: asFetch(fetchFn),
+      tokenProvider,
+      requestInit: { headers },
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(Object.getOwnPropertySymbols(fetchFn.mock.calls[0]?.[1]?.headers as object)).toEqual([]);
+    expect(new Headers(fetchFn.mock.calls[1]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer token-1",
+    );
+    expect(Object.getOwnPropertySymbols(headers)).toHaveLength(1);
+  });
+});
+
+describe("resolveRequestUrl", () => {
+  it.each([
+    {
+      name: "resolves string input",
+      input: "https://example.com/a",
+      expected: "https://example.com/a",
+    },
+    {
+      name: "resolves URL input",
+      input: new URL("https://example.com/b"),
+      expected: "https://example.com/b",
+    },
+    {
+      name: "resolves object input with url field",
+      input: { url: "https://example.com/c" } as unknown as RequestInfo,
+      expected: "https://example.com/c",
+    },
+  ])("$name", ({ input, expected }) => {
+    expect(resolveRequestUrl(input)).toBe(expected);
   });
 });

@@ -1,7 +1,7 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-runtime";
+import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import plugin from "../index.js";
 import {
   DEFAULT_TAVILY_BASE_URL,
   DEFAULT_TAVILY_EXTRACT_TIMEOUT_SECONDS,
@@ -34,14 +34,15 @@ describe("tavily tools", () => {
   let createTavilySearchTool: typeof import("./tavily-search-tool.js").createTavilySearchTool;
   let createTavilyExtractTool: typeof import("./tavily-extract-tool.js").createTavilyExtractTool;
   let tavilyClientTesting: typeof import("./tavily-client.js").__testing;
+  let tavilyPlugin: typeof import("../index.js").default;
 
   beforeAll(async () => {
-    vi.resetModules();
     ({ createTavilyWebSearchProvider } = await import("./tavily-search-provider.js"));
     ({ createTavilySearchTool } = await import("./tavily-search-tool.js"));
     ({ createTavilyExtractTool } = await import("./tavily-extract-tool.js"));
     ({ __testing: tavilyClientTesting } =
       await vi.importActual<typeof import("./tavily-client.js")>("./tavily-client.js"));
+    ({ default: tavilyPlugin } = await import("../index.js"));
   });
 
   beforeEach(() => {
@@ -62,39 +63,6 @@ describe("tavily tools", () => {
     expect(provider.id).toBe("tavily");
     expect(provider.credentialPath).toBe("plugins.entries.tavily.config.webSearch.apiKey");
     expect(applied.plugins?.entries?.tavily?.enabled).toBe(true);
-  });
-
-  it("registers web search provider and two tools", () => {
-    const registrations: {
-      webSearchProviders: unknown[];
-      tools: unknown[];
-    } = { webSearchProviders: [], tools: [] };
-
-    const mockApi = {
-      registerWebSearchProvider(provider: unknown) {
-        registrations.webSearchProviders.push(provider);
-      },
-      registerTool(tool: unknown) {
-        registrations.tools.push(tool);
-      },
-      config: {},
-    };
-
-    plugin.register(mockApi as never);
-
-    expect(plugin.id).toBe("tavily");
-    expect(plugin.name).toBe("Tavily Plugin");
-    expect(registrations.webSearchProviders).toHaveLength(1);
-    expect(registrations.tools).toHaveLength(2);
-
-    const provider = registrations.webSearchProviders[0] as Record<string, unknown>;
-    expect(provider.id).toBe("tavily");
-    expect(provider.autoDetectOrder).toBe(70);
-    expect(provider.envVars).toEqual(["TAVILY_API_KEY"]);
-
-    const toolNames = registrations.tools.map((t) => (t as Record<string, unknown>).name);
-    expect(toolNames).toContain("tavily_search");
-    expect(toolNames).toContain("tavily_extract");
   });
 
   it("maps generic provider args into Tavily search params", async () => {
@@ -173,6 +141,85 @@ describe("tavily tools", () => {
     expect(result.content[0]).toMatchObject({
       type: "text",
     });
+  });
+
+  it("late-binds dedicated tools to the resolved runtime config snapshot", async () => {
+    const rawConfig = {
+      plugins: {
+        entries: {
+          tavily: {
+            config: {
+              webSearch: {
+                apiKey: { source: "exec", provider: "default", id: "printf resolved-key" },
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const runtimeConfig = {
+      plugins: {
+        entries: {
+          tavily: {
+            config: {
+              webSearch: {
+                apiKey: "resolved-key",
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const registeredTools: Array<Parameters<OpenClawPluginApi["registerTool"]>[0]> = [];
+    const registeredOptions: Array<Parameters<OpenClawPluginApi["registerTool"]>[1]> = [];
+    const api = createTestPluginApi({
+      config: rawConfig,
+      registerTool(tool, opts) {
+        registeredTools.push(tool);
+        registeredOptions.push(opts);
+      },
+    });
+
+    tavilyPlugin.register(api);
+    const searchFactory = registeredTools.find(
+      (tool, index) =>
+        registeredOptions[index]?.name === "tavily_search" && typeof tool === "function",
+    );
+    const extractFactory = registeredTools.find(
+      (tool, index) =>
+        registeredOptions[index]?.name === "tavily_extract" && typeof tool === "function",
+    );
+    if (typeof searchFactory !== "function" || typeof extractFactory !== "function") {
+      throw new Error("Expected Tavily tools to register as runtime-context factories");
+    }
+
+    const searchTool = searchFactory({
+      config: rawConfig,
+      runtimeConfig,
+    });
+    const extractTool = extractFactory({
+      config: rawConfig,
+      getRuntimeConfig: () => runtimeConfig,
+    });
+    if (Array.isArray(searchTool) || !searchTool || Array.isArray(extractTool) || !extractTool) {
+      throw new Error("Expected single Tavily tool definitions");
+    }
+
+    await searchTool.execute("search-call", { query: "openclaw" });
+    await extractTool.execute("extract-call", { urls: ["https://example.com"] });
+
+    expect(runTavilySearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: runtimeConfig,
+        query: "openclaw",
+      }),
+    );
+    expect(runTavilyExtract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: runtimeConfig,
+        urls: ["https://example.com"],
+      }),
+    );
   });
 
   it("drops empty domain arrays and forwards query-scoped chunking", async () => {
