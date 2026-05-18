@@ -1,23 +1,22 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Artur Bodera <abodera@gmail.com>
-Date: Wed, 6 May 2026 12:00:00 +1000
+From 80854fbbd5c1fdeacbc1f6293c9c60c67123b854 Mon Sep 17 00:00:00 2001
+From: Test User <test@example.com>
+Date: Mon, 18 May 2026 11:22:26 +1000
 Subject: [PATCH] feat(sandbox): allow disabling no-new-privileges for sudo
 
 ---
- src/agents/sandbox-create-args.test.ts | 17 +++++++++++++++++
+ src/agents/sandbox-create-args.test.ts | 18 ++++++++++++++++++
  src/agents/sandbox/config.ts           |  1 +
  src/agents/sandbox/docker.ts           |  4 +++-
- src/config/schema.base.generated.ts    |  6 ++++++
- src/config/types.sandbox.ts            |  6 ++++++
+ src/config/types.sandbox.ts            |  5 +++++
  src/config/zod-schema.agent-runtime.ts |  1 +
- 6 files changed, 34 insertions(+), 1 deletion(-)
+ 5 files changed, 28 insertions(+), 1 deletion(-)
 
 diff --git a/src/agents/sandbox-create-args.test.ts b/src/agents/sandbox-create-args.test.ts
-index 4f5fae4b9be..88bd1c6a976 100644
+index ec25ac95457..8ad08f43790 100644
 --- a/src/agents/sandbox-create-args.test.ts
 +++ b/src/agents/sandbox-create-args.test.ts
-@@ -38,6 +38,22 @@ describe("buildSandboxCreateArgs", () => {
-     ).toThrow(expectedMessage);
+@@ -58,6 +58,24 @@ describe("buildSandboxCreateArgs", () => {
+     }
    }
  
 +  it("omits no-new-privileges only with explicit dangerous override", () => {
@@ -25,6 +24,7 @@ index 4f5fae4b9be..88bd1c6a976 100644
 +      name: "openclaw-sbx-test",
 +      cfg: createSandboxConfig(),
 +      scopeKey: "main",
++      createdAtMs: 1700000000000,
 +    });
 +    expect(defaultArgs).toEqual(expect.arrayContaining(["--security-opt", "no-new-privileges"]));
 +
@@ -32,6 +32,7 @@ index 4f5fae4b9be..88bd1c6a976 100644
 +      name: "openclaw-sbx-test",
 +      cfg: createSandboxConfig({ dangerouslyDisableNoNewPrivileges: true }),
 +      scopeKey: "main",
++      createdAtMs: 1700000000000,
 +    });
 +    expect(overrideArgs).not.toContain("no-new-privileges");
 +  });
@@ -66,30 +67,6 @@ index 597e749965e..c7556536b72 100644
    if (params.cfg.seccompProfile) {
      args.push("--security-opt", `seccomp=${params.cfg.seccompProfile}`);
    }
-diff --git a/src/config/schema.base.generated.ts b/src/config/schema.base.generated.ts
-index bc405d4520e..5f5bf0d1e7b 100644
---- a/src/config/schema.base.generated.ts
-+++ b/src/config/schema.base.generated.ts
-@@ -5831,6 +5831,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-                           type: "string",
-                         },
-                       },
-+                      dangerouslyDisableNoNewPrivileges: {
-+                        type: "boolean",
-+                      },
-                       env: {
-                         type: "object",
-                         propertyNames: {
-@@ -7595,6 +7598,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
-                             type: "string",
-                           },
-                         },
-+                        dangerouslyDisableNoNewPrivileges: {
-+                          type: "boolean",
-+                        },
-                         env: {
-                           type: "object",
-                           propertyNames: {
 diff --git a/src/config/types.sandbox.ts b/src/config/types.sandbox.ts
 index 1a4670d3c2a..a8fefec49ad 100644
 --- a/src/config/types.sandbox.ts
@@ -107,7 +84,7 @@ index 1a4670d3c2a..a8fefec49ad 100644
    env?: Record<string, string>;
    /** Optional setup command run once after container creation (array entries are joined by newline). */
 diff --git a/src/config/zod-schema.agent-runtime.ts b/src/config/zod-schema.agent-runtime.ts
-index daa2f0116c2..eb864fae697 100644
+index 30f24725bcf..012ff3f83ed 100644
 --- a/src/config/zod-schema.agent-runtime.ts
 +++ b/src/config/zod-schema.agent-runtime.ts
 @@ -113,6 +113,7 @@ const SandboxDockerSchema = z
@@ -118,3 +95,6 @@ index daa2f0116c2..eb864fae697 100644
      env: z.record(z.string(), z.string()).optional(),
      setupCommand: z
        .union([z.string(), z.array(z.string())])
+-- 
+2.53.0
+

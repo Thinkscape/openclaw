@@ -1,21 +1,21 @@
-From 71e22b95b939b0877155afb042eb469a8205b598 Mon Sep 17 00:00:00 2001
-From: Artur Bodera <abodera@gmail.com>
-Date: Wed, 8 Apr 2026 14:48:15 +1000
+From a2284e03e286a33cbda69d42540e07de16598c7c Mon Sep 17 00:00:00 2001
+From: Test User <test@example.com>
+Date: Mon, 18 May 2026 11:21:24 +1000
 Subject: [PATCH] feat(config): make subagent spawn self-call timeout
  configurable
 
 ---
- src/agents/subagent-spawn.ts                  | 27 +++++++++++++++----
+ src/agents/subagent-spawn.ts                  | 29 +++++++++++++++----
  .../config.agent-concurrency-defaults.test.ts |  4 ++-
  src/config/types.agent-defaults.ts            |  5 ++++
- src/config/zod-schema.agent-defaults.ts       |  8 ++++++
- 4 files changed, 38 insertions(+), 6 deletions(-)
+ src/config/zod-schema.agent-defaults.ts       |  8 +++++
+ 4 files changed, 40 insertions(+), 6 deletions(-)
 
 diff --git a/src/agents/subagent-spawn.ts b/src/agents/subagent-spawn.ts
-index eed7fef2e2d..d46716f43c1 100644
+index 1801a6f7515..189b81f40da 100644
 --- a/src/agents/subagent-spawn.ts
 +++ b/src/agents/subagent-spawn.ts
-@@ -115,6 +115,7 @@ let subagentSpawnDeps: SubagentSpawnDeps = defaultSubagentSpawnDeps;
+@@ -113,6 +113,7 @@ let subagentSpawnDeps: SubagentSpawnDeps = defaultSubagentSpawnDeps;
  const SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS = 60_000;
  const DEFAULT_SUBAGENT_AGENT_GATEWAY_TIMEOUT_MS = 60_000;
  const MAX_SUBAGENT_AGENT_GATEWAY_TIMEOUT_MS = 300_000;
@@ -23,11 +23,13 @@ index eed7fef2e2d..d46716f43c1 100644
  
  export type SpawnSubagentParams = {
    task: string;
-@@ -261,6 +262,14 @@ function loadSubagentConfig() {
+@@ -261,6 +262,16 @@ function loadSubagentConfig() {
    return subagentSpawnDeps.getRuntimeConfig();
  }
  
-+export function resolveSubagentGatewayTimeoutMs(cfg: ReturnType<typeof getRuntimeConfig>): number | undefined {
++export function resolveSubagentGatewayTimeoutMs(
++  cfg: ReturnType<typeof getRuntimeConfig>,
++): number | undefined {
 +  const configured = cfg.agents?.defaults?.subagents?.gatewayTimeoutMs;
 +  if (typeof configured !== "number" || !Number.isFinite(configured)) {
 +    return undefined;
@@ -38,7 +40,7 @@ index eed7fef2e2d..d46716f43c1 100644
  async function persistInitialChildSessionRuntimeModel(params: {
    cfg: OpenClawConfig;
    childSessionKey: string;
-@@ -500,6 +509,7 @@ async function cleanupProvisionalSession(
+@@ -500,6 +511,7 @@ async function cleanupProvisionalSession(
    options?: {
      emitLifecycleHooks?: boolean;
      deleteTranscript?: boolean;
@@ -46,7 +48,7 @@ index eed7fef2e2d..d46716f43c1 100644
    },
  ): Promise<void> {
    try {
-@@ -510,7 +520,7 @@ async function cleanupProvisionalSession(
+@@ -510,7 +522,7 @@ async function cleanupProvisionalSession(
          emitLifecycleHooks: options?.emitLifecycleHooks === true,
          deleteTranscript: options?.deleteTranscript === true,
        },
@@ -55,7 +57,7 @@ index eed7fef2e2d..d46716f43c1 100644
      });
    } catch {
      // Best-effort cleanup only.
-@@ -522,6 +532,7 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
+@@ -522,6 +534,7 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
    attachmentAbsDir?: string;
    emitLifecycleHooks?: boolean;
    deleteTranscript?: boolean;
@@ -63,7 +65,7 @@ index eed7fef2e2d..d46716f43c1 100644
  }): Promise<void> {
    if (params.attachmentAbsDir) {
      try {
-@@ -533,6 +544,7 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
+@@ -533,6 +546,7 @@ async function cleanupFailedSpawnBeforeAgentStart(params: {
    await cleanupProvisionalSession(params.childSessionKey, {
      emitLifecycleHooks: params.emitLifecycleHooks,
      deleteTranscript: params.deleteTranscript,
@@ -71,7 +73,7 @@ index eed7fef2e2d..d46716f43c1 100644
    });
  }
  
-@@ -723,6 +735,7 @@ export async function spawnSubagentDirect(
+@@ -731,6 +745,7 @@ export async function spawnSubagentDirect(
      cfg,
      runTimeoutSeconds: params.runTimeoutSeconds,
    });
@@ -79,7 +81,7 @@ index eed7fef2e2d..d46716f43c1 100644
    let modelApplied = false;
    let threadBindingReady = false;
    let hasBoundThreadDeliveryOrigin = false;
-@@ -914,6 +927,7 @@ export async function spawnSubagentDirect(
+@@ -922,6 +937,7 @@ export async function spawnSubagentDirect(
      await cleanupProvisionalSession(childSessionKey, {
        emitLifecycleHooks: false,
        deleteTranscript: true,
@@ -87,7 +89,7 @@ index eed7fef2e2d..d46716f43c1 100644
      });
      return {
        status: "error",
-@@ -932,7 +946,7 @@ export async function spawnSubagentDirect(
+@@ -940,7 +956,7 @@ export async function spawnSubagentDirect(
          await callSubagentGateway({
            method: "sessions.delete",
            params: { key: childSessionKey, emitLifecycleHooks: false },
@@ -96,7 +98,7 @@ index eed7fef2e2d..d46716f43c1 100644
          });
        } catch {
          // Best-effort cleanup only.
-@@ -965,7 +979,7 @@ export async function spawnSubagentDirect(
+@@ -973,7 +989,7 @@ export async function spawnSubagentDirect(
          await callSubagentGateway({
            method: "sessions.delete",
            params: { key: childSessionKey, deleteTranscript: true, emitLifecycleHooks: false },
@@ -105,7 +107,7 @@ index eed7fef2e2d..d46716f43c1 100644
          });
        } catch {
          // Best-effort cleanup only.
-@@ -1019,6 +1033,7 @@ export async function spawnSubagentDirect(
+@@ -1027,6 +1043,7 @@ export async function spawnSubagentDirect(
      await cleanupProvisionalSession(childSessionKey, {
        emitLifecycleHooks: threadBindingReady,
        deleteTranscript: true,
@@ -113,7 +115,7 @@ index eed7fef2e2d..d46716f43c1 100644
      });
      return {
        status: materializedAttachments.status,
-@@ -1071,6 +1086,7 @@ export async function spawnSubagentDirect(
+@@ -1079,6 +1096,7 @@ export async function spawnSubagentDirect(
        attachmentAbsDir,
        emitLifecycleHooks: threadBindingReady,
        deleteTranscript: true,
@@ -121,7 +123,7 @@ index eed7fef2e2d..d46716f43c1 100644
      });
      return {
        status: "error",
-@@ -1091,6 +1107,7 @@ export async function spawnSubagentDirect(
+@@ -1099,6 +1117,7 @@ export async function spawnSubagentDirect(
        attachmentAbsDir,
        emitLifecycleHooks: threadBindingReady,
        deleteTranscript: true,
@@ -129,7 +131,7 @@ index eed7fef2e2d..d46716f43c1 100644
      });
      return {
        status: "error",
-@@ -1196,7 +1213,7 @@ export async function spawnSubagentDirect(
+@@ -1204,7 +1223,7 @@ export async function spawnSubagentDirect(
            deleteTranscript: true,
            emitLifecycleHooks,
          },
@@ -138,7 +140,7 @@ index eed7fef2e2d..d46716f43c1 100644
        });
      } catch {
        // Best-effort only.
-@@ -1248,7 +1265,7 @@ export async function spawnSubagentDirect(
+@@ -1257,7 +1276,7 @@ export async function spawnSubagentDirect(
            deleteTranscript: true,
            emitLifecycleHooks: threadBindingReady,
          },
@@ -176,10 +178,10 @@ index f5bda63b0ed..5f663480501 100644
  
    it("injects missing agent defaults", () => {
 diff --git a/src/config/types.agent-defaults.ts b/src/config/types.agent-defaults.ts
-index 08b847cc591..a728cf1f948 100644
+index 5bfe11c418e..ebbccff7821 100644
 --- a/src/config/types.agent-defaults.ts
 +++ b/src/config/types.agent-defaults.ts
-@@ -428,6 +428,11 @@ export type AgentDefaultsConfig = {
+@@ -441,6 +441,11 @@ export type AgentDefaultsConfig = {
      thinking?: string;
      /** Default run timeout in seconds for spawned sub-agents (0 = no timeout). */
      runTimeoutSeconds?: number;
@@ -188,14 +190,14 @@ index 08b847cc591..a728cf1f948 100644
 +     * (sessions.patch / agent / sessions.delete). Default: 10000.
 +     */
 +    gatewayTimeoutMs?: number;
-     /** Gateway timeout in ms for sub-agent announce delivery calls (default: 90000). */
+     /** Gateway timeout in ms for sub-agent announce delivery calls (default: 120000). */
      announceTimeoutMs?: number;
      /** Require explicit agentId in sessions_spawn (no default same-as-caller). Default: false. */
 diff --git a/src/config/zod-schema.agent-defaults.ts b/src/config/zod-schema.agent-defaults.ts
-index eb43b954360..bb440ce541f 100644
+index 9621509db44..9c3e91e0eb0 100644
 --- a/src/config/zod-schema.agent-defaults.ts
 +++ b/src/config/zod-schema.agent-defaults.ts
-@@ -281,6 +281,14 @@ export const AgentDefaultsSchema = z
+@@ -284,6 +284,14 @@ export const AgentDefaultsSchema = z
          model: AgentModelSchema.optional(),
          thinking: z.string().optional(),
          runTimeoutSeconds: z.number().int().min(0).optional(),
