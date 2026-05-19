@@ -1,6 +1,6 @@
-From 80854fbbd5c1fdeacbc1f6293c9c60c67123b854 Mon Sep 17 00:00:00 2001
+From 735f924bc78de4bf03ad3bfe70f80094b55285f1 Mon Sep 17 00:00:00 2001
 From: Test User <test@example.com>
-Date: Mon, 18 May 2026 11:22:26 +1000
+Date: Tue, 19 May 2026 11:16:42 +1000
 Subject: [PATCH] feat(sandbox): allow disabling no-new-privileges for sudo
 
 ---
@@ -12,7 +12,7 @@ Subject: [PATCH] feat(sandbox): allow disabling no-new-privileges for sudo
  5 files changed, 28 insertions(+), 1 deletion(-)
 
 diff --git a/src/agents/sandbox-create-args.test.ts b/src/agents/sandbox-create-args.test.ts
-index ec25ac95457..8ad08f43790 100644
+index 06ad063455c..ceb9416117e 100644
 --- a/src/agents/sandbox-create-args.test.ts
 +++ b/src/agents/sandbox-create-args.test.ts
 @@ -58,6 +58,24 @@ describe("buildSandboxCreateArgs", () => {
@@ -53,10 +53,10 @@ index d8688a801ff..27b8ea67f94 100644
  
  const DEFAULT_SANDBOX_SSH_COMMAND = "ssh";
 diff --git a/src/agents/sandbox/docker.ts b/src/agents/sandbox/docker.ts
-index 597e749965e..c7556536b72 100644
+index b1de2188a07..50344ab4d70 100644
 --- a/src/agents/sandbox/docker.ts
 +++ b/src/agents/sandbox/docker.ts
-@@ -438,7 +438,9 @@ export function buildSandboxCreateArgs(params: {
+@@ -478,7 +478,9 @@ export function buildSandboxCreateArgs(params: {
    for (const cap of params.cfg.capDrop) {
      args.push("--cap-drop", cap);
    }
@@ -68,26 +68,26 @@ index 597e749965e..c7556536b72 100644
      args.push("--security-opt", `seccomp=${params.cfg.seccompProfile}`);
    }
 diff --git a/src/config/types.sandbox.ts b/src/config/types.sandbox.ts
-index 1a4670d3c2a..a8fefec49ad 100644
+index 7901af6c7a2..91f9d3ef4e9 100644
 --- a/src/config/types.sandbox.ts
 +++ b/src/config/types.sandbox.ts
-@@ -17,6 +17,11 @@ export type SandboxDockerSettings = {
-   user?: string;
-   /** Drop Linux capabilities. */
-   capDrop?: string[];
+@@ -61,6 +61,11 @@ export type SandboxDockerSettings = {
+    * Default behavior blocks container namespace joins to preserve sandbox isolation.
+    */
+   dangerouslyAllowContainerNamespaceJoin?: boolean;
 +  /**
-+   * Dangerous override: do not set Docker no-new-privileges.
-+   * This permits setuid helpers such as sudo inside the sandbox container.
++   * Dangerous override: disable Docker `no-new-privileges` for sandbox containers.
++   * This allows setuid helpers such as `sudo` to elevate inside the sandbox.
 +   */
 +  dangerouslyDisableNoNewPrivileges?: boolean;
-   /** Extra environment variables for sandbox exec. */
-   env?: Record<string, string>;
-   /** Optional setup command run once after container creation (array entries are joined by newline). */
+ };
+ 
+ export type SandboxBrowserSettings = {
 diff --git a/src/config/zod-schema.agent-runtime.ts b/src/config/zod-schema.agent-runtime.ts
-index 30f24725bcf..012ff3f83ed 100644
+index 6b86747cc86..0fbff13f826 100644
 --- a/src/config/zod-schema.agent-runtime.ts
 +++ b/src/config/zod-schema.agent-runtime.ts
-@@ -113,6 +113,7 @@ const SandboxDockerSchema = z
+@@ -131,6 +131,7 @@ const SandboxDockerSchema = z
      network: z.string().optional(),
      user: z.string().optional(),
      capDrop: z.array(z.string()).optional(),
