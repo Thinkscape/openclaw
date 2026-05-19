@@ -61,6 +61,24 @@ describe("buildSandboxCreateArgs", () => {
     }
   }
 
+  it("omits no-new-privileges only with explicit dangerous override", () => {
+    const defaultArgs = buildSandboxCreateArgs({
+      name: "openclaw-sbx-test",
+      cfg: createSandboxConfig(),
+      scopeKey: "main",
+      createdAtMs: 1700000000000,
+    });
+    expect(defaultArgs).toEqual(expect.arrayContaining(["--security-opt", "no-new-privileges"]));
+
+    const overrideArgs = buildSandboxCreateArgs({
+      name: "openclaw-sbx-test",
+      cfg: createSandboxConfig({ dangerouslyDisableNoNewPrivileges: true }),
+      scopeKey: "main",
+      createdAtMs: 1700000000000,
+    });
+    expect(overrideArgs).not.toContain("no-new-privileges");
+  });
+
   it("includes hardening and resource flags", () => {
     const cfg: SandboxDockerConfig = {
       image: "openclaw-sandbox:bookworm-slim",
