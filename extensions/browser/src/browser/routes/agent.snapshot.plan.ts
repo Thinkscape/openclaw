@@ -1,3 +1,7 @@
+import {
+  normalizeOptionalString,
+  readStringValue,
+} from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { ResolvedBrowserProfile } from "../config.js";
 import {
   DEFAULT_AI_SNAPSHOT_EFFICIENT_DEPTH,
@@ -11,10 +15,11 @@ import {
 } from "../profile-capabilities.js";
 import { toBoolean, toNumber, toStringOrEmpty } from "./utils.js";
 
-export type BrowserSnapshotPlan = {
+type BrowserSnapshotPlan = {
   format: "ai" | "aria";
   mode?: "efficient";
   labels?: boolean;
+  urls?: boolean;
   limit?: number;
   resolvedMaxChars?: number;
   interactive?: boolean;
@@ -23,6 +28,7 @@ export type BrowserSnapshotPlan = {
   refsMode?: "aria" | "role";
   selectorValue?: string;
   frameSelectorValue?: string;
+  timeoutMs?: number;
   wantsRoleSnapshot: boolean;
 };
 
@@ -33,6 +39,7 @@ export function resolveSnapshotPlan(params: {
 }): BrowserSnapshotPlan {
   const mode = params.query.mode === "efficient" ? "efficient" : undefined;
   const labels = toBoolean(params.query.labels) ?? undefined;
+  const urls = toBoolean(params.query.urls) ?? undefined;
   const explicitFormat =
     params.query.format === "aria" ? "aria" : params.query.format === "ai" ? "ai" : undefined;
   const format = resolveDefaultSnapshotFormat({
@@ -41,14 +48,13 @@ export function resolveSnapshotPlan(params: {
     explicitFormat,
     mode,
   });
-  const limitRaw = typeof params.query.limit === "string" ? Number(params.query.limit) : undefined;
+  const limitRaw = readStringValue(params.query.limit);
   const hasMaxChars = Object.hasOwn(params.query, "maxChars");
-  const maxCharsRaw =
-    typeof params.query.maxChars === "string" ? Number(params.query.maxChars) : undefined;
-  const limit = Number.isFinite(limitRaw) ? limitRaw : undefined;
+  const maxCharsRaw = readStringValue(params.query.maxChars);
+  const limit = Number.isFinite(Number(limitRaw)) ? Number(limitRaw) : undefined;
   const maxChars =
-    typeof maxCharsRaw === "number" && Number.isFinite(maxCharsRaw) && maxCharsRaw > 0
-      ? Math.floor(maxCharsRaw)
+    Number.isFinite(Number(maxCharsRaw)) && Number(maxCharsRaw) > 0
+      ? Math.floor(Number(maxCharsRaw))
       : undefined;
   const resolvedMaxChars =
     format === "ai"
@@ -68,13 +74,19 @@ export function resolveSnapshotPlan(params: {
   const compact = compactRaw ?? (mode === "efficient" ? true : undefined);
   const depth =
     depthRaw ?? (mode === "efficient" ? DEFAULT_AI_SNAPSHOT_EFFICIENT_DEPTH : undefined);
-  const selectorValue = toStringOrEmpty(params.query.selector).trim() || undefined;
-  const frameSelectorValue = toStringOrEmpty(params.query.frame).trim() || undefined;
+  const selectorValue = normalizeOptionalString(toStringOrEmpty(params.query.selector));
+  const frameSelectorValue = normalizeOptionalString(toStringOrEmpty(params.query.frame));
+  const timeoutMsRaw = toNumber(params.query.timeoutMs);
+  const timeoutMs =
+    timeoutMsRaw !== undefined && Number.isFinite(timeoutMsRaw) && timeoutMsRaw > 0
+      ? Math.max(1, Math.floor(timeoutMsRaw))
+      : undefined;
 
   return {
     format,
     mode,
     labels,
+    urls,
     limit,
     resolvedMaxChars,
     interactive,
@@ -83,8 +95,10 @@ export function resolveSnapshotPlan(params: {
     refsMode,
     selectorValue,
     frameSelectorValue,
+    timeoutMs,
     wantsRoleSnapshot:
       labels === true ||
+      urls === true ||
       mode === "efficient" ||
       interactive === true ||
       compact === true ||

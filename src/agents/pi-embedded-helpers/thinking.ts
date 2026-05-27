@@ -1,4 +1,6 @@
 import { normalizeThinkLevel, type ThinkLevel } from "../../auto-reply/thinking.js";
+import { normalizeStringEntries } from "../../shared/string-normalization.js";
+import { isReasoningConstraintErrorMessage } from "./errors.js";
 
 function extractSupportedValues(raw: string): string[] {
   const match =
@@ -11,12 +13,11 @@ function extractSupportedValues(raw: string): string[] {
     entry[1]?.trim(),
   );
   if (quoted.length > 0) {
-    return quoted.filter((entry): entry is string => Boolean(entry));
+    return normalizeStringEntries(quoted.filter((entry): entry is string => Boolean(entry)));
   }
-  return fragment
-    .split(/,|\band\b/gi)
-    .map((entry) => entry.replace(/^[^a-zA-Z]+|[^a-zA-Z]+$/g, "").trim())
-    .filter(Boolean);
+  return normalizeStringEntries(
+    fragment.split(/,|\band\b/gi).map((entry) => entry.replace(/^[^a-zA-Z]+|[^a-zA-Z]+$/g, "")),
+  );
 }
 
 export function pickFallbackThinkingLevel(params: {
@@ -26,6 +27,11 @@ export function pickFallbackThinkingLevel(params: {
   const raw = params.message?.trim();
   if (!raw) {
     return undefined;
+  }
+  // Some OpenRouter/MiniMax endpoints reject `off` entirely and require a
+  // non-zero reasoning level, so our first safe retry is `minimal`.
+  if (isReasoningConstraintErrorMessage(raw) && !params.attempted.has("minimal")) {
+    return "minimal";
   }
   const supported = extractSupportedValues(raw);
   if (supported.length === 0) {

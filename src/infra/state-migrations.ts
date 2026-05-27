@@ -2,8 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
-import { resolveDefaultTelegramAccountId } from "../channels/read-only-account-inspect.telegram.js";
-import type { OpenClawConfig } from "../config/config.js";
+import {
+  listBundledChannelLegacySessionSurfaces,
+  listBundledChannelLegacyStateMigrationDetectors,
+} from "../channels/plugins/bundled.js";
+import type { ChannelLegacyStateMigrationPlan } from "../channels/plugins/types.core.js";
 import {
   resolveLegacyStateDirs,
   resolveNewStateDir,
@@ -14,24 +17,28 @@ import type { SessionEntry } from "../config/sessions.js";
 import { saveSessionStore } from "../config/sessions.js";
 import { canonicalizeMainSessionAlias } from "../config/sessions/main-session.js";
 import type { SessionScope } from "../config/sessions/types.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import { resolveChannelAllowFromPath } from "../pairing/pairing-store.js";
+import { createPluginStateKeyedStore } from "../plugin-state/plugin-state-store.js";
 import {
   buildAgentMainSessionKey,
-  DEFAULT_ACCOUNT_ID,
   DEFAULT_AGENT_ID,
   DEFAULT_MAIN_KEY,
   normalizeAgentId,
   normalizeMainKey,
   parseAgentSessionKey,
 } from "../routing/session-key.js";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalLowercaseString,
+} from "../shared/string-coerce.js";
 import { expandHomePrefix } from "./home-dir.js";
 import { isWithinDir } from "./path-safety.js";
 import {
   ensureDir,
   existsDir,
   fileExists,
-  isLegacyWhatsAppAuthFile,
+  parseSessionStoreJson5,
   readSessionStoreJson5,
   type SessionEntryLike,
   safeReadDir,
@@ -56,22 +63,11 @@ export type LegacyStateDetection = {
     targetDir: string;
     hasLegacy: boolean;
   };
-  whatsappAuth: {
-    legacyDir: string;
-    targetDir: string;
+  channelPlans: {
     hasLegacy: boolean;
-  };
-  pairingAllowFrom: {
-    hasLegacyTelegram: boolean;
-    copyPlans: FileCopyPlan[];
+    plans: ChannelLegacyStateMigrationPlan[];
   };
   preview: string[];
-};
-
-type FileCopyPlan = {
-  label: string;
-  sourcePath: string;
-  targetPath: string;
 };
 
 type MigrationLogger = {
@@ -81,6 +77,23 @@ type MigrationLogger = {
 
 let autoMigrateChecked = false;
 let autoMigrateStateDirChecked = false;
+let cachedLegacySessionSurfaces: LegacySessionSurface[] | null = null;
+
+type LegacySessionSurface = {
+  isLegacyGroupSessionKey?: (key: string) => boolean;
+  canonicalizeLegacySessionKey?: (params: {
+    key: string;
+    agentId: string;
+  }) => string | null | undefined;
+};
+
+function getLegacySessionSurfaces(): LegacySessionSurface[] {
+  // Legacy migrations run on cold doctor/startup paths. Prefer the narrower
+  // setup plugin surface here so session-key cleanup does not materialize full
+  // bundled channel runtimes.
+  cachedLegacySessionSurfaces ??= [...listBundledChannelLegacySessionSurfaces()];
+  return cachedLegacySessionSurfaces;
+}
 
 function isSurfaceGroupKey(key: string): boolean {
   return key.includes(":group:") || key.includes(":channel:");
@@ -91,40 +104,131 @@ function isLegacyGroupKey(key: string): boolean {
   if (!trimmed) {
     return false;
   }
-  if (trimmed.startsWith("group:")) {
+  const lower = normalizeLowercaseStringOrEmpty(trimmed);
+  if (lower.startsWith("group:") || lower.startsWith("channel:")) {
     return true;
   }
-  const lower = trimmed.toLowerCase();
-  if (!lower.includes("@g.us")) {
-    return false;
-  }
-  // Legacy WhatsApp group keys: bare JID or "whatsapp:<jid>" without explicit ":group:" kind.
-  if (!trimmed.includes(":")) {
-    return true;
-  }
-  if (lower.startsWith("whatsapp:") && !trimmed.includes(":group:")) {
-    return true;
+  for (const surface of getLegacySessionSurfaces()) {
+    if (surface.isLegacyGroupSessionKey?.(trimmed)) {
+      return true;
+    }
   }
   return false;
 }
 
-function buildFileCopyPreview(plan: FileCopyPlan): string {
+function buildLegacyMigrationPreview(plan: ChannelLegacyStateMigrationPlan): string {
+  if (plan.kind === "plugin-state-import") {
+    return plan.preview ?? `- ${plan.label}: ${plan.sourcePath}`;
+  }
   return `- ${plan.label}: ${plan.sourcePath} → ${plan.targetPath}`;
 }
 
-async function runFileCopyPlans(
-  plans: FileCopyPlan[],
+function resolvePluginStateImportTargetKey(scopeKey: string, key: string): string {
+  return scopeKey ? `${scopeKey}:${key}` : key;
+}
+
+async function withPluginStateImportEnv<T>(
+  plan: Extract<ChannelLegacyStateMigrationPlan, { kind: "plugin-state-import" }>,
+  run: () => Promise<T>,
+): Promise<T> {
+  if (!plan.stateDir) {
+    return await run();
+  }
+  const previous = process.env.OPENCLAW_STATE_DIR;
+  process.env.OPENCLAW_STATE_DIR = plan.stateDir;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.OPENCLAW_STATE_DIR;
+    } else {
+      process.env.OPENCLAW_STATE_DIR = previous;
+    }
+  }
+}
+
+async function runLegacyMigrationPlans(
+  plans: ChannelLegacyStateMigrationPlan[],
 ): Promise<{ changes: string[]; warnings: string[] }> {
   const changes: string[] = [];
   const warnings: string[] = [];
   for (const plan of plans) {
+    if (plan.kind === "plugin-state-import") {
+      await withPluginStateImportEnv(plan, async () => {
+        let storeEntries: Array<{ key: string }> = [];
+        const store = createPluginStateKeyedStore<unknown>(plan.pluginId, {
+          namespace: plan.namespace,
+          maxEntries: plan.maxEntries,
+        });
+        try {
+          storeEntries = await store.entries();
+        } catch (err) {
+          warnings.push(
+            `Failed reading ${plan.label} plugin state before migration: ${String(err)}`,
+          );
+          return;
+        }
+        const existingKeys = new Set(storeEntries.map(({ key }) => key));
+        let remainingCapacity = Math.max(0, plan.maxEntries - storeEntries.length);
+        const entries = await plan.readEntries();
+        let imported = 0;
+        for (const entry of entries) {
+          const targetKey = resolvePluginStateImportTargetKey(plan.scopeKey, entry.key);
+          if (existingKeys.has(targetKey)) {
+            continue;
+          }
+          if (remainingCapacity <= 0) {
+            break;
+          }
+          try {
+            await store.register(targetKey, entry.value);
+            existingKeys.add(targetKey);
+            remainingCapacity--;
+            imported++;
+          } catch (err) {
+            warnings.push(`Failed migrating ${plan.label} entry ${entry.key}: ${String(err)}`);
+          }
+        }
+        if (imported > 0) {
+          changes.push(
+            `Migrated ${imported} ${plan.label} ${imported === 1 ? "entry" : "entries"} → plugin state`,
+          );
+        }
+        const allEntriesCovered =
+          entries.length > 0 &&
+          entries.every(({ key }) =>
+            existingKeys.has(resolvePluginStateImportTargetKey(plan.scopeKey, key)),
+          );
+        if (allEntriesCovered && plan.cleanupSource === "rename" && fileExists(plan.sourcePath)) {
+          const archivedPath = `${plan.sourcePath}.migrated`;
+          if (fileExists(archivedPath)) {
+            warnings.push(
+              `Left migrated ${plan.label} source in place because ${archivedPath} already exists`,
+            );
+            return;
+          }
+          try {
+            fs.renameSync(plan.sourcePath, archivedPath);
+            changes.push(`Archived ${plan.label} legacy source → ${archivedPath}`);
+          } catch (err) {
+            warnings.push(`Failed archiving ${plan.label} legacy source: ${String(err)}`);
+          }
+        }
+      });
+      continue;
+    }
     if (fileExists(plan.targetPath)) {
       continue;
     }
     try {
       ensureDir(path.dirname(plan.targetPath));
-      fs.copyFileSync(plan.sourcePath, plan.targetPath);
-      changes.push(`Copied ${plan.label} → ${plan.targetPath}`);
+      if (plan.kind === "move") {
+        fs.renameSync(plan.sourcePath, plan.targetPath);
+        changes.push(`Moved ${plan.label} → ${plan.targetPath}`);
+      } else {
+        fs.copyFileSync(plan.sourcePath, plan.targetPath);
+        changes.push(`Copied ${plan.label} → ${plan.targetPath}`);
+      }
     } catch (err) {
       warnings.push(`Failed migrating ${plan.label} (${plan.sourcePath}): ${String(err)}`);
     }
@@ -144,8 +248,9 @@ function canonicalizeSessionKeyForAgent(params: {
   if (!raw) {
     return raw;
   }
-  if (raw.toLowerCase() === "global" || raw.toLowerCase() === "unknown") {
-    return raw.toLowerCase();
+  const rawLower = normalizeLowercaseStringOrEmpty(raw);
+  if (rawLower === "global" || rawLower === "unknown") {
+    return rawLower;
   }
 
   // When shared-store guard is active, do not remap keys that belong to a
@@ -156,9 +261,8 @@ function canonicalizeSessionKeyForAgent(params: {
   if (params.skipCrossAgentRemap) {
     const parsed = parseAgentSessionKey(raw);
     if (parsed && normalizeAgentId(parsed.agentId) !== agentId) {
-      return raw.toLowerCase();
+      return rawLower;
     }
-    const rawLower = raw.toLowerCase();
     if (
       agentId !== DEFAULT_AGENT_ID &&
       (rawLower === DEFAULT_MAIN_KEY || rawLower === params.mainKey)
@@ -173,7 +277,7 @@ function canonicalizeSessionKeyForAgent(params: {
     sessionKey: raw,
   });
   if (canonicalMain !== raw) {
-    return canonicalMain.toLowerCase();
+    return normalizeLowercaseStringOrEmpty(canonicalMain);
   }
 
   // Handle cross-agent orphaned main-session keys: "agent:main:main" or
@@ -182,7 +286,6 @@ function canonicalizeSessionKeyForAgent(params: {
   // (hooks, subagents, cron, per-sender) may be intentional cross-agent
   // references and must not be touched (#29683).
   const defaultPrefix = `agent:${DEFAULT_AGENT_ID}:`;
-  const rawLower = raw.toLowerCase();
   if (
     rawLower.startsWith(defaultPrefix) &&
     agentId !== DEFAULT_AGENT_ID &&
@@ -197,39 +300,37 @@ function canonicalizeSessionKeyForAgent(params: {
         agentId,
         sessionKey: remapped,
       });
-      return canonicalized.toLowerCase();
+      return normalizeLowercaseStringOrEmpty(canonicalized);
     }
   }
 
-  if (raw.toLowerCase().startsWith("agent:")) {
-    return raw.toLowerCase();
+  if (rawLower.startsWith("agent:")) {
+    return rawLower;
   }
-  if (raw.toLowerCase().startsWith("subagent:")) {
+  if (rawLower.startsWith("subagent:")) {
     const rest = raw.slice("subagent:".length);
-    return `agent:${agentId}:subagent:${rest}`.toLowerCase();
+    return normalizeLowercaseStringOrEmpty(`agent:${agentId}:subagent:${rest}`);
   }
-  if (raw.startsWith("group:")) {
-    const id = raw.slice("group:".length).trim();
-    if (!id) {
-      return raw;
+  // Channel-owned legacy shapes must win before the generic group/channel
+  // fallback so plugin-specific legacy group keys can canonicalize to their
+  // owning channel instead of the generic `...:unknown:group:...` bucket.
+  for (const surface of getLegacySessionSurfaces()) {
+    const canonicalized = surface.canonicalizeLegacySessionKey?.({
+      key: raw,
+      agentId,
+    });
+    const normalizedCanonicalized = normalizeOptionalLowercaseString(canonicalized);
+    if (normalizedCanonicalized) {
+      return normalizedCanonicalized;
     }
-    const channel = id.toLowerCase().includes("@g.us") ? "whatsapp" : "unknown";
-    return `agent:${agentId}:${channel}:group:${id}`.toLowerCase();
   }
-  if (!raw.includes(":") && raw.toLowerCase().includes("@g.us")) {
-    return `agent:${agentId}:whatsapp:group:${raw}`.toLowerCase();
-  }
-  if (raw.toLowerCase().startsWith("whatsapp:") && raw.toLowerCase().includes("@g.us")) {
-    const remainder = raw.slice("whatsapp:".length).trim();
-    const cleaned = remainder.replace(/^group:/i, "").trim();
-    if (cleaned && !isSurfaceGroupKey(raw)) {
-      return `agent:${agentId}:whatsapp:group:${cleaned}`.toLowerCase();
-    }
+  if (rawLower.startsWith("group:") || rawLower.startsWith("channel:")) {
+    return normalizeLowercaseStringOrEmpty(`agent:${agentId}:unknown:${raw}`);
   }
   if (isSurfaceGroupKey(raw)) {
-    return `agent:${agentId}:${raw}`.toLowerCase();
+    return normalizeLowercaseStringOrEmpty(`agent:${agentId}:${raw}`);
   }
-  return `agent:${agentId}:${raw}`.toLowerCase();
+  return normalizeLowercaseStringOrEmpty(`agent:${agentId}:${raw}`);
 }
 
 function pickLatestLegacyDirectEntry(
@@ -251,7 +352,7 @@ function pickLatestLegacyDirectEntry(
     if (normalized.startsWith("agent:")) {
       continue;
     }
-    if (normalized.toLowerCase().startsWith("subagent:")) {
+    if (normalizeLowercaseStringOrEmpty(normalized).startsWith("subagent:")) {
       continue;
     }
     if (isLegacyGroupKey(normalized) || isSurfaceGroupKey(normalized)) {
@@ -366,6 +467,213 @@ function canonicalizeSessionStore(params: {
   return { store: canonical, legacyKeys };
 }
 
+function skipJson5Trivia(raw: string, index: number): number {
+  let i = index;
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (ch === " " || ch === "\n" || ch === "\r" || ch === "\t") {
+      i++;
+      continue;
+    }
+    if (ch === "/" && raw[i + 1] === "/") {
+      i += 2;
+      while (i < raw.length && raw[i] !== "\n") {
+        i++;
+      }
+      continue;
+    }
+    if (ch === "/" && raw[i + 1] === "*") {
+      i += 2;
+      while (i < raw.length && !(raw[i] === "*" && raw[i + 1] === "/")) {
+        i++;
+      }
+      return i < raw.length ? i + 2 : i;
+    }
+    break;
+  }
+  return i;
+}
+
+function readJson5String(raw: string, index: number): { value: string; next: number } | null {
+  const quote = raw[index];
+  if (quote !== '"' && quote !== "'") {
+    return null;
+  }
+  let i = index + 1;
+  let value = "";
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (ch === quote) {
+      return { value, next: i + 1 };
+    }
+    if (ch === "\\") {
+      return null;
+    }
+    value += ch;
+    i++;
+  }
+  return null;
+}
+
+function readJson5BareKey(raw: string, index: number): { value: string; next: number } | null {
+  let i = index;
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (
+      ch === ":" ||
+      ch === " " ||
+      ch === "\n" ||
+      ch === "\r" ||
+      ch === "\t" ||
+      ch === "," ||
+      ch === "}" ||
+      ch === "{" ||
+      ch === "[" ||
+      ch === "]"
+    ) {
+      break;
+    }
+    i++;
+  }
+  if (i === index) {
+    return null;
+  }
+  return { value: raw.slice(index, i), next: i };
+}
+
+function listTopLevelSessionStoreKeys(raw: string): string[] | null {
+  let i = skipJson5Trivia(raw, 0);
+  if (raw[i] !== "{") {
+    return null;
+  }
+  i++;
+  const keys: string[] = [];
+  let depth = 1;
+  let expectingKey = true;
+
+  while (i < raw.length) {
+    i = skipJson5Trivia(raw, i);
+    const ch = raw[i];
+    if (ch === undefined) {
+      return null;
+    }
+    if (depth === 1 && ch === "}") {
+      return keys;
+    }
+    if (depth === 1 && expectingKey) {
+      const key = ch === '"' || ch === "'" ? readJson5String(raw, i) : readJson5BareKey(raw, i);
+      if (!key) {
+        return null;
+      }
+      i = skipJson5Trivia(raw, key.next);
+      if (raw[i] !== ":") {
+        return null;
+      }
+      keys.push(key.value);
+      i++;
+      expectingKey = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      const str = readJson5String(raw, i);
+      if (!str) {
+        return null;
+      }
+      i = str.next;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      depth++;
+      i++;
+      continue;
+    }
+    if (ch === "}" || ch === "]") {
+      depth--;
+      i++;
+      if (depth < 1) {
+        return keys;
+      }
+      continue;
+    }
+    if (depth === 1 && ch === ",") {
+      expectingKey = true;
+      i++;
+      continue;
+    }
+    i++;
+  }
+  return null;
+}
+
+export function sessionStoreTextMayNeedCanonicalization(params: {
+  raw: string;
+  storeAgentIds: Iterable<string>;
+  mainKey: string;
+  scope?: SessionScope;
+}): boolean {
+  const keys = listTopLevelSessionStoreKeys(params.raw);
+  if (!keys) {
+    return true;
+  }
+  const storeAgentIds = new Set([...params.storeAgentIds].map((id) => normalizeAgentId(id)));
+  const hasNonMainAgent = [...storeAgentIds].some((id) => id !== DEFAULT_AGENT_ID);
+  for (const key of keys) {
+    const rawKey = key.trim();
+    if (rawKey !== key) {
+      return true;
+    }
+    if (!rawKey) {
+      continue;
+    }
+    const lowerKey = normalizeLowercaseStringOrEmpty(rawKey);
+    if (lowerKey !== rawKey) {
+      return true;
+    }
+    if (lowerKey === "global" || lowerKey === "unknown") {
+      continue;
+    }
+    if (lowerKey === DEFAULT_MAIN_KEY || lowerKey === params.mainKey) {
+      return true;
+    }
+    if (lowerKey.startsWith("subagent:")) {
+      return true;
+    }
+    if (lowerKey.startsWith("group:") || lowerKey.startsWith("channel:")) {
+      return true;
+    }
+    if (!lowerKey.startsWith("agent:")) {
+      return true;
+    }
+    for (const storeAgentId of storeAgentIds) {
+      const agentMainAlias = `agent:${storeAgentId}:${DEFAULT_MAIN_KEY}`;
+      const agentMainKey = `agent:${storeAgentId}:${params.mainKey}`;
+      if (
+        lowerKey === agentMainAlias &&
+        (params.mainKey !== DEFAULT_MAIN_KEY || params.scope === "global")
+      ) {
+        return true;
+      }
+      if (lowerKey === agentMainKey && params.scope === "global") {
+        return true;
+      }
+    }
+    if (
+      lowerKey === `agent:${DEFAULT_AGENT_ID}:${DEFAULT_MAIN_KEY}` &&
+      (params.mainKey !== DEFAULT_MAIN_KEY || hasNonMainAgent || params.scope === "global")
+    ) {
+      return true;
+    }
+    if (
+      lowerKey === `agent:${DEFAULT_AGENT_ID}:${params.mainKey}` &&
+      hasNonMainAgent &&
+      !storeAgentIds.has(DEFAULT_AGENT_ID)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function listLegacySessionKeys(params: {
   store: Record<string, SessionEntryLike>;
   agentId: string;
@@ -410,6 +718,7 @@ function removeDirIfEmpty(dir: string) {
 
 export function resetAutoMigrateLegacyStateForTest() {
   autoMigrateChecked = false;
+  cachedLegacySessionSurfaces = null;
 }
 
 export function resetAutoMigrateLegacyAgentDirForTest() {
@@ -629,7 +938,6 @@ export async function autoMigrateLegacyStateDir(params: {
     } catch (fallbackErr) {
       try {
         if (!legacyDir) {
-          // oxlint-disable-next-line preserve-caught-error
           throw new Error("Legacy state dir not found", { cause: fallbackErr });
         }
         fs.renameSync(targetDir, legacyDir);
@@ -650,6 +958,36 @@ export async function autoMigrateLegacyStateDir(params: {
   }
 
   return { migrated: changes.length > 0, skipped: false, changes, warnings };
+}
+
+async function collectChannelLegacyStateMigrationPlans(params: {
+  cfg: OpenClawConfig;
+  env: NodeJS.ProcessEnv;
+  stateDir: string;
+  oauthDir: string;
+}): Promise<ChannelLegacyStateMigrationPlan[]> {
+  const plans: ChannelLegacyStateMigrationPlan[] = [];
+  // Legacy state detection belongs on a narrow setup-entry surface so doctor
+  // does not cold-load unrelated runtime channel code.
+  const detectors = listBundledChannelLegacyStateMigrationDetectors({ config: params.cfg });
+  for (const detectLegacyStateMigrations of detectors) {
+    const detected = await detectLegacyStateMigrations({
+      cfg: params.cfg,
+      env: params.env,
+      stateDir: params.stateDir,
+      oauthDir: params.oauthDir,
+    });
+    if (detected?.length) {
+      for (const detectedPlan of detected) {
+        const plan =
+          detectedPlan.kind === "plugin-state-import" && !detectedPlan.stateDir
+            ? { ...detectedPlan, stateDir: params.stateDir }
+            : detectedPlan;
+        plans.push(plan);
+      }
+    }
+  }
+  return plans;
 }
 
 export async function detectLegacyStateMigrations(params: {
@@ -694,30 +1032,12 @@ export async function detectLegacyStateMigrations(params: {
   const legacyAgentDir = path.join(stateDir, "agent");
   const targetAgentDir = path.join(stateDir, "agents", targetAgentId, "agent");
   const hasLegacyAgentDir = existsDir(legacyAgentDir);
-
-  const targetWhatsAppAuthDir = path.join(oauthDir, "whatsapp", DEFAULT_ACCOUNT_ID);
-  const hasLegacyWhatsAppAuth =
-    fileExists(path.join(oauthDir, "creds.json")) &&
-    !fileExists(path.join(targetWhatsAppAuthDir, "creds.json"));
-  const legacyTelegramAllowFromPath = resolveChannelAllowFromPath("telegram", env);
-  const targetTelegramAccountId = resolveDefaultTelegramAccountId(params.cfg);
-  const targetTelegramAllowFromPath = resolveChannelAllowFromPath(
-    "telegram",
+  const channelPlans = await collectChannelLegacyStateMigrationPlans({
+    cfg: params.cfg,
     env,
-    targetTelegramAccountId,
-  );
-  const telegramPairingAllowFromPlans = fileExists(legacyTelegramAllowFromPath)
-    ? [targetTelegramAllowFromPath]
-        .filter((targetPath) => !fileExists(targetPath))
-        .map(
-          (targetPath): FileCopyPlan => ({
-            label: "Telegram pairing allowFrom",
-            sourcePath: legacyTelegramAllowFromPath,
-            targetPath,
-          }),
-        )
-    : [];
-  const hasLegacyTelegramAllowFrom = telegramPairingAllowFromPlans.length > 0;
+    stateDir,
+    oauthDir,
+  });
 
   const preview: string[] = [];
   if (hasLegacySessions) {
@@ -729,11 +1049,8 @@ export async function detectLegacyStateMigrations(params: {
   if (hasLegacyAgentDir) {
     preview.push(`- Agent dir: ${legacyAgentDir} → ${targetAgentDir}`);
   }
-  if (hasLegacyWhatsAppAuth) {
-    preview.push(`- WhatsApp auth: ${oauthDir} → ${targetWhatsAppAuthDir} (keep oauth.json)`);
-  }
-  if (hasLegacyTelegramAllowFrom) {
-    preview.push(...telegramPairingAllowFromPlans.map(buildFileCopyPreview));
+  if (channelPlans.length > 0) {
+    preview.push(...channelPlans.map(buildLegacyMigrationPreview));
   }
 
   return {
@@ -755,14 +1072,9 @@ export async function detectLegacyStateMigrations(params: {
       targetDir: targetAgentDir,
       hasLegacy: hasLegacyAgentDir,
     },
-    whatsappAuth: {
-      legacyDir: oauthDir,
-      targetDir: targetWhatsAppAuthDir,
-      hasLegacy: hasLegacyWhatsAppAuth,
-    },
-    pairingAllowFrom: {
-      hasLegacyTelegram: hasLegacyTelegramAllowFrom,
-      copyPlans: telegramPairingAllowFromPlans,
+    channelPlans: {
+      hasLegacy: channelPlans.length > 0,
+      plans: channelPlans,
     },
     preview,
   };
@@ -942,77 +1254,32 @@ export async function migrateLegacyAgentDir(
   return { changes, warnings };
 }
 
-async function migrateLegacyWhatsAppAuth(
-  detected: LegacyStateDetection,
-): Promise<{ changes: string[]; warnings: string[] }> {
-  const changes: string[] = [];
-  const warnings: string[] = [];
-  if (!detected.whatsappAuth.hasLegacy) {
-    return { changes, warnings };
-  }
-
-  ensureDir(detected.whatsappAuth.targetDir);
-
-  const entries = safeReadDir(detected.whatsappAuth.legacyDir);
-  for (const entry of entries) {
-    if (!entry.isFile()) {
-      continue;
-    }
-    if (entry.name === "oauth.json") {
-      continue;
-    }
-    if (!isLegacyWhatsAppAuthFile(entry.name)) {
-      continue;
-    }
-    const from = path.join(detected.whatsappAuth.legacyDir, entry.name);
-    const to = path.join(detected.whatsappAuth.targetDir, entry.name);
-    if (fileExists(to)) {
-      continue;
-    }
-    try {
-      fs.renameSync(from, to);
-      changes.push(`Moved WhatsApp auth ${entry.name} → whatsapp/default`);
-    } catch (err) {
-      warnings.push(`Failed moving ${from}: ${String(err)}`);
-    }
-  }
-
-  return { changes, warnings };
-}
-
-async function migrateLegacyTelegramPairingAllowFrom(
-  detected: LegacyStateDetection,
-): Promise<{ changes: string[]; warnings: string[] }> {
-  const changes: string[] = [];
-  const warnings: string[] = [];
-  if (!detected.pairingAllowFrom.hasLegacyTelegram) {
-    return { changes, warnings };
-  }
-  return await runFileCopyPlans(detected.pairingAllowFrom.copyPlans);
-}
-
 export async function runLegacyStateMigrations(params: {
   detected: LegacyStateDetection;
   now?: () => number;
 }): Promise<{ changes: string[]; warnings: string[] }> {
   const now = params.now ?? (() => Date.now());
   const detected = params.detected;
+  const preSessionChannelPlans = await runLegacyMigrationPlans(
+    detected.channelPlans.plans.filter((plan) => plan.kind === "plugin-state-import"),
+  );
   const sessions = await migrateLegacySessions(detected, now);
   const agentDir = await migrateLegacyAgentDir(detected, now);
-  const whatsappAuth = await migrateLegacyWhatsAppAuth(detected);
-  const telegramPairingAllowFrom = await migrateLegacyTelegramPairingAllowFrom(detected);
+  const channelPlans = await runLegacyMigrationPlans(
+    detected.channelPlans.plans.filter((plan) => plan.kind !== "plugin-state-import"),
+  );
   return {
     changes: [
+      ...preSessionChannelPlans.changes,
       ...sessions.changes,
       ...agentDir.changes,
-      ...whatsappAuth.changes,
-      ...telegramPairingAllowFrom.changes,
+      ...channelPlans.changes,
     ],
     warnings: [
+      ...preSessionChannelPlans.warnings,
       ...sessions.warnings,
       ...agentDir.warnings,
-      ...whatsappAuth.warnings,
-      ...telegramPairingAllowFrom.warnings,
+      ...channelPlans.warnings,
     ],
   };
 }
@@ -1104,9 +1371,26 @@ export async function migrateOrphanedSessionKeys(params: {
     if (!fileExists(storePath)) {
       continue;
     }
+    let raw: string;
+    try {
+      raw = fs.readFileSync(storePath, "utf-8");
+    } catch (err) {
+      warnings.push(`Could not read ${storePath}: ${String(err)}`);
+      continue;
+    }
+    if (
+      !sessionStoreTextMayNeedCanonicalization({
+        raw,
+        storeAgentIds,
+        mainKey,
+        scope,
+      })
+    ) {
+      continue;
+    }
     let parsed: ReturnType<typeof readSessionStoreJson5>;
     try {
-      parsed = readSessionStoreJson5(storePath);
+      parsed = parseSessionStoreJson5(raw);
     } catch (err) {
       warnings.push(`Could not read ${storePath}: ${String(err)}`);
       continue;
