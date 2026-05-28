@@ -11,7 +11,9 @@ export {
 } from "./pi-embedded-helpers/bootstrap.js";
 export {
   BILLING_ERROR_USER_MESSAGE,
+  classifyProviderRuntimeFailureKind,
   formatBillingErrorMessage,
+  formatRateLimitOrOverloadedErrorCopy,
   classifyFailoverReason,
   classifyFailoverReasonFromHttpStatus,
   formatRawAssistantErrorForUi,
@@ -24,7 +26,6 @@ export {
   isBillingAssistantError,
   extractObservedOverflowTokenCount,
   parseApiErrorInfo,
-  sanitizeUserFacingText,
   isBillingErrorMessage,
   isCloudflareOrHtmlErrorPage,
   isCloudCodeAssistFormatError,
@@ -44,11 +45,14 @@ export {
   parseImageDimensionError,
   parseImageSizeError,
 } from "./pi-embedded-helpers/errors.js";
+export type { ProviderRuntimeFailureKind } from "./pi-embedded-helpers/errors.js";
+export { sanitizeUserFacingText } from "./pi-embedded-helpers/sanitize-user-facing-text.js";
 export { isGoogleModelApi, sanitizeGoogleTurnOrdering } from "./pi-embedded-helpers/google.js";
 
 export {
   downgradeOpenAIFunctionCallReasoningPairs,
   downgradeOpenAIReasoningBlocks,
+  normalizeOpenAIResponsesToolCallIds,
 } from "./pi-embedded-helpers/openai.js";
 export {
   isEmptyAssistantMessageContent,

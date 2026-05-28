@@ -6,6 +6,7 @@ import {
   resolveGatewayAuthTokenForService,
   shouldRequireGatewayTokenForInstall,
 } from "./doctor-gateway-auth-token.js";
+import { resolveGatewayInstallToken } from "./gateway-install-token.js";
 
 const envVar = (...parts: string[]) => parts.join("_");
 
@@ -148,7 +149,9 @@ describe("resolveGatewayAuthTokenForService", () => {
     );
 
     expect(resolved.token).toBeUndefined();
-    expect(resolved.unavailableReason).toContain("gateway.auth.token SecretRef is configured");
+    expect(resolved.unavailableReason).toBe(
+      "gateway.auth.token SecretRef is configured but unresolved (gateway.auth.token SecretRef is unresolved (env:default:MISSING_GATEWAY_TOKEN).).",
+    );
   });
 });
 
@@ -267,5 +270,22 @@ describe("shouldRequireGatewayTokenForInstall", () => {
       {} as NodeJS.ProcessEnv,
     );
     expect(required).toBe(true);
+  });
+
+  it("blocks install token resolution for tailscale serve with explicit no-auth", async () => {
+    const resolved = await resolveGatewayInstallToken({
+      config: {
+        gateway: {
+          auth: { mode: "none" },
+          tailscale: { mode: "serve" },
+        },
+      } as OpenClawConfig,
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    expect(resolved.token).toBeUndefined();
+    expect(resolved.unavailableReason).toBe(
+      "gateway.auth.mode=none cannot be used with gateway.tailscale.mode=serve; configure token, password, or trusted-proxy auth before exposing the gateway through Tailscale",
+    );
   });
 });

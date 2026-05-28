@@ -1,10 +1,27 @@
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import {
+  MAX_PLUGIN_APPROVAL_ACTIONS,
   MAX_PLUGIN_APPROVAL_TIMEOUT_MS,
+  PLUGIN_APPROVAL_ACTION_COMMAND_TEMPLATE_MAX_LENGTH,
+  PLUGIN_APPROVAL_ACTION_LABEL_MAX_LENGTH,
   PLUGIN_APPROVAL_DESCRIPTION_MAX_LENGTH,
   PLUGIN_APPROVAL_TITLE_MAX_LENGTH,
 } from "../../../infra/plugin-approvals.js";
 import { NonEmptyString } from "./primitives.js";
+
+const PluginApprovalActionTemplateSchema = Type.Object(
+  {
+    kind: Type.String({ enum: ["decision", "command"] }),
+    label: Type.String({ minLength: 1, maxLength: PLUGIN_APPROVAL_ACTION_LABEL_MAX_LENGTH }),
+    style: Type.String({ enum: ["primary", "secondary", "success", "danger"] }),
+    decision: Type.Optional(Type.String({ enum: ["allow-once", "allow-always", "deny"] })),
+    commandTemplate: Type.String({
+      minLength: 1,
+      maxLength: PLUGIN_APPROVAL_ACTION_COMMAND_TEMPLATE_MAX_LENGTH,
+    }),
+  },
+  { additionalProperties: false },
+);
 
 export const PluginApprovalRequestParamsSchema = Type.Object(
   {
@@ -14,6 +31,18 @@ export const PluginApprovalRequestParamsSchema = Type.Object(
     severity: Type.Optional(Type.String({ enum: ["info", "warning", "critical"] })),
     toolName: Type.Optional(Type.String()),
     toolCallId: Type.Optional(Type.String()),
+    allowedDecisions: Type.Optional(
+      Type.Array(Type.String({ enum: ["allow-once", "allow-always", "deny"] }), {
+        minItems: 1,
+        maxItems: 3,
+      }),
+    ),
+    actions: Type.Optional(
+      Type.Array(PluginApprovalActionTemplateSchema, {
+        minItems: 1,
+        maxItems: MAX_PLUGIN_APPROVAL_ACTIONS,
+      }),
+    ),
     agentId: Type.Optional(Type.String()),
     sessionKey: Type.Optional(Type.String()),
     turnSourceChannel: Type.Optional(Type.String()),
@@ -22,6 +51,7 @@ export const PluginApprovalRequestParamsSchema = Type.Object(
     turnSourceThreadId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
     timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_PLUGIN_APPROVAL_TIMEOUT_MS })),
     twoPhase: Type.Optional(Type.Boolean()),
+    keepPendingWithoutRoute: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

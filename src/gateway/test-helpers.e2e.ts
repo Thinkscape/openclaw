@@ -11,6 +11,7 @@ import {
   signDevicePayload,
 } from "../infra/device-identity.js";
 import { rawDataToString } from "../infra/ws.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { getDeterministicFreePortBlock } from "../test-utils/ports.js";
 import {
   GATEWAY_CLIENT_MODES,
@@ -30,6 +31,7 @@ export async function getFreeGatewayPort(): Promise<number> {
 export async function connectGatewayClient(params: {
   url: string;
   token?: string;
+  deviceToken?: string;
   clientName?: GatewayClientName;
   clientDisplayName?: string;
   clientVersion?: string;
@@ -48,37 +50,47 @@ export async function connectGatewayClient(params: {
   timeoutMessage?: string;
 }) {
   const role = params.role ?? "operator";
+  const scopes = params.scopes ?? (role === "node" ? [] : undefined);
   const platform = params.platform ?? process.platform;
   const identityRoot = process.env.OPENCLAW_STATE_DIR ?? process.env.HOME ?? os.tmpdir();
   const deviceIdentity =
     params.deviceIdentity ??
     loadOrCreateDeviceIdentity(
       (() => {
-        const safe =
-          `${params.clientName ?? GATEWAY_CLIENT_NAMES.TEST}-${params.mode ?? GATEWAY_CLIENT_MODES.TEST}-${platform}-${params.deviceFamily ?? "none"}-${role}`
-            .replace(/[^a-zA-Z0-9._-]+/g, "_")
-            .toLowerCase();
+        const safe = normalizeLowercaseStringOrEmpty(
+          `${params.clientName ?? GATEWAY_CLIENT_NAMES.TEST}-${params.mode ?? GATEWAY_CLIENT_MODES.TEST}-${platform}-${params.deviceFamily ?? "none"}-${role}`.replace(
+            /[^a-zA-Z0-9._-]+/g,
+            "_",
+          ),
+        );
         return path.join(identityRoot, "test-device-identities", `${safe}.json`);
       })(),
     );
   return await new Promise<InstanceType<typeof GatewayClient>>((resolve, reject) => {
     let settled = false;
-    const stop = (err?: Error, client?: InstanceType<typeof GatewayClient>) => {
+    let client: InstanceType<typeof GatewayClient> | undefined;
+    const stop = (err?: Error, connectedClient?: InstanceType<typeof GatewayClient>) => {
       if (settled) {
         return;
       }
       settled = true;
       clearTimeout(timer);
       if (err) {
+        void client?.stopAndWait({ timeoutMs: 1_000 }).catch(() => {
+          client?.stop();
+        });
         reject(err);
       } else {
-        resolve(client as InstanceType<typeof GatewayClient>);
+        resolve(connectedClient as InstanceType<typeof GatewayClient>);
       }
     };
-    const client = new GatewayClient({
+    client = new GatewayClient({
       url: params.url,
       token: params.token,
-      connectChallengeTimeoutMs: params.connectChallengeTimeoutMs ?? 0,
+      deviceToken: params.deviceToken,
+      ...(params.connectChallengeTimeoutMs !== undefined
+        ? { connectChallengeTimeoutMs: params.connectChallengeTimeoutMs }
+        : {}),
       clientName: params.clientName ?? GATEWAY_CLIENT_NAMES.TEST,
       clientDisplayName: params.clientDisplayName ?? "vitest",
       clientVersion: params.clientVersion ?? "dev",
@@ -86,7 +98,7 @@ export async function connectGatewayClient(params: {
       deviceFamily: params.deviceFamily,
       mode: params.mode ?? GATEWAY_CLIENT_MODES.TEST,
       role,
-      scopes: params.scopes,
+      scopes,
       caps: params.caps,
       commands: params.commands,
       instanceId: params.instanceId,
