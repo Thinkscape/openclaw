@@ -1,6 +1,8 @@
 import path from "node:path";
 import { formatCliCommand } from "../cli/command-format.js";
-import type { OpenClawConfig } from "../config/config.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { resolveTimerTimeoutMs } from "../shared/number-coercion.js";
+import { asNullableObjectRecord } from "../shared/record-coerce.js";
 import { note } from "../terminal/note.js";
 
 const TLS_CERT_ERROR_CODES = new Set([
@@ -33,17 +35,13 @@ export type OpenAIOAuthTlsPreflightResult =
       message: string;
     };
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-}
-
 function extractFailure(error: unknown): {
   code?: string;
   message: string;
   kind: PreflightFailureKind;
 } {
-  const root = asRecord(error);
-  const rootCause = asRecord(root?.cause);
+  const root = asNullableObjectRecord(error);
+  const rootCause = asNullableObjectRecord(root?.cause);
   const code = typeof rootCause?.code === "string" ? rootCause.code : undefined;
   const message =
     typeof rootCause?.message === "string"
@@ -89,7 +87,7 @@ function hasOpenAICodexOAuthProfile(cfg: OpenClawConfig): boolean {
   );
 }
 
-function shouldRunOpenAIOAuthTlsPrerequisites(params: {
+export function shouldRunOpenAIOAuthTlsPrerequisites(params: {
   cfg: OpenClawConfig;
   deep?: boolean;
 }): boolean {
@@ -103,7 +101,7 @@ export async function runOpenAIOAuthTlsPreflight(options?: {
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }): Promise<OpenAIOAuthTlsPreflightResult> {
-  const timeoutMs = options?.timeoutMs ?? 5000;
+  const timeoutMs = resolveTimerTimeoutMs(options?.timeoutMs, 5000);
   const fetchImpl = options?.fetchImpl ?? fetch;
   try {
     await fetchImpl(OPENAI_AUTH_PROBE_URL, {

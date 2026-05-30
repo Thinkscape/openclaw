@@ -1,5 +1,10 @@
 import type { Command } from "commander";
-import type { BrowserParentOpts } from "../browser-cli-shared.js";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import {
+  parseBrowserNonNegativeIntegerOption,
+  parseBrowserPositiveIntegerOption,
+  type BrowserParentOpts,
+} from "../browser-cli-shared.js";
 import { danger, defaultRuntime } from "../core-api.js";
 import {
   callBrowserAct,
@@ -12,6 +17,25 @@ export function registerBrowserElementCommands(
   browser: Command,
   parentOpts: (cmd: Command) => BrowserParentOpts,
 ) {
+  const parseDecimalNumber = (value: string): number | undefined => {
+    const trimmed = value.trim();
+    if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)) {
+      return undefined;
+    }
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+
+  const parseRequiredNumber = (value: string, label: string): number | undefined => {
+    const parsed = parseDecimalNumber(value);
+    if (parsed === undefined) {
+      defaultRuntime.error(danger(`Invalid ${label}: must be a finite number`));
+      defaultRuntime.exit(1);
+      return undefined;
+    }
+    return parsed;
+  };
+
   const runElementAction = async (params: {
     cmd: Command;
     body: Record<string, unknown>;
@@ -61,15 +85,51 @@ export function registerBrowserElementCommands(
         body: {
           kind: "click",
           ref: refValue,
-          targetId: opts.targetId?.trim() || undefined,
+          targetId: normalizeOptionalString(opts.targetId),
           doubleClick: Boolean(opts.double),
-          button: opts.button?.trim() || undefined,
+          button: normalizeOptionalString(opts.button),
           modifiers,
         },
         successMessage: (result) => {
           const url = (result as { url?: unknown }).url;
           const suffix = typeof url === "string" && url ? ` on ${url}` : "";
           return `clicked ref ${refValue}${suffix}`;
+        },
+      });
+    });
+
+  browser
+    .command("click-coords")
+    .description("Click viewport coordinates")
+    .argument("<x>", "Viewport x coordinate")
+    .argument("<y>", "Viewport y coordinate")
+    .option("--target-id <id>", "CDP target id (or unique prefix)")
+    .option("--double", "Double click", false)
+    .option("--button <left|right|middle>", "Mouse button to use")
+    .option("--delay-ms <ms>", "Delay between mouse down/up", (v: string) =>
+      parseBrowserNonNegativeIntegerOption(v, "--delay-ms"),
+    )
+    .action(async (xRaw: string, yRaw: string, opts, cmd) => {
+      const x = parseRequiredNumber(xRaw, "x");
+      const y = parseRequiredNumber(yRaw, "y");
+      if (x === undefined || y === undefined) {
+        return;
+      }
+      await runElementAction({
+        cmd,
+        body: {
+          kind: "clickCoords",
+          x,
+          y,
+          targetId: normalizeOptionalString(opts.targetId),
+          doubleClick: Boolean(opts.double),
+          button: normalizeOptionalString(opts.button),
+          delayMs: Number.isFinite(opts.delayMs) ? opts.delayMs : undefined,
+        },
+        successMessage: (result) => {
+          const url = (result as { url?: unknown }).url;
+          const suffix = typeof url === "string" && url ? ` on ${url}` : "";
+          return `clicked ${x},${y}${suffix}`;
         },
       });
     });
@@ -95,7 +155,7 @@ export function registerBrowserElementCommands(
           text,
           submit: Boolean(opts.submit),
           slowly: Boolean(opts.slowly),
-          targetId: opts.targetId?.trim() || undefined,
+          targetId: normalizeOptionalString(opts.targetId),
         },
         successMessage: `typed into ref ${refValue}`,
       });
@@ -109,7 +169,7 @@ export function registerBrowserElementCommands(
     .action(async (key: string, opts, cmd) => {
       await runElementAction({
         cmd,
-        body: { kind: "press", key, targetId: opts.targetId?.trim() || undefined },
+        body: { kind: "press", key, targetId: normalizeOptionalString(opts.targetId) },
         successMessage: `pressed ${key}`,
       });
     });
@@ -122,7 +182,7 @@ export function registerBrowserElementCommands(
     .action(async (ref: string, opts, cmd) => {
       await runElementAction({
         cmd,
-        body: { kind: "hover", ref, targetId: opts.targetId?.trim() || undefined },
+        body: { kind: "hover", ref, targetId: normalizeOptionalString(opts.targetId) },
         successMessage: `hovered ref ${ref}`,
       });
     });
@@ -133,7 +193,7 @@ export function registerBrowserElementCommands(
     .argument("<ref>", "Ref id from snapshot")
     .option("--target-id <id>", "CDP target id (or unique prefix)")
     .option("--timeout-ms <ms>", "How long to wait for scroll (default: 20000)", (v: string) =>
-      Number(v),
+      parseBrowserPositiveIntegerOption(v, "--timeout-ms"),
     )
     .action(async (ref: string | undefined, opts, cmd) => {
       const refValue = requireRef(ref);
@@ -146,7 +206,7 @@ export function registerBrowserElementCommands(
         body: {
           kind: "scrollIntoView",
           ref: refValue,
-          targetId: opts.targetId?.trim() || undefined,
+          targetId: normalizeOptionalString(opts.targetId),
           timeoutMs,
         },
         timeoutMs,
@@ -167,7 +227,7 @@ export function registerBrowserElementCommands(
           kind: "drag",
           startRef,
           endRef,
-          targetId: opts.targetId?.trim() || undefined,
+          targetId: normalizeOptionalString(opts.targetId),
         },
         successMessage: `dragged ${startRef} → ${endRef}`,
       });
@@ -186,7 +246,7 @@ export function registerBrowserElementCommands(
           kind: "select",
           ref,
           values,
-          targetId: opts.targetId?.trim() || undefined,
+          targetId: normalizeOptionalString(opts.targetId),
         },
         successMessage: `selected ${values.join(", ")}`,
       });

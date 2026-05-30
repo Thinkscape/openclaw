@@ -1,5 +1,10 @@
 import type { Command } from "commander";
-import type { BrowserParentOpts } from "../browser-cli-shared.js";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import {
+  parseBrowserNonNegativeIntegerOption,
+  parseBrowserPositiveIntegerOption,
+  type BrowserParentOpts,
+} from "../browser-cli-shared.js";
 import { danger, defaultRuntime } from "../core-api.js";
 import {
   callBrowserAct,
@@ -7,6 +12,23 @@ import {
   readFields,
   resolveBrowserActionContext,
 } from "./shared.js";
+
+const DEFAULT_WAIT_CONDITION_TIMEOUT_MS = 20000;
+type BrowserWaitLoadState = "load" | "domcontentloaded" | "networkidle";
+
+function parseBrowserWaitLoadState(value: unknown): BrowserWaitLoadState | undefined {
+  const load = normalizeOptionalString(value);
+  switch (load) {
+    case undefined:
+      return undefined;
+    case "load":
+    case "domcontentloaded":
+    case "networkidle":
+      return load;
+    default:
+      throw new Error(`Invalid --load value: ${load}`);
+  }
+}
 
 export function registerBrowserFormWaitEvalCommands(
   browser: Command,
@@ -31,7 +53,7 @@ export function registerBrowserFormWaitEvalCommands(
           body: {
             kind: "fill",
             fields,
-            targetId: opts.targetId?.trim() || undefined,
+            targetId: normalizeOptionalString(opts.targetId),
           },
         });
         logBrowserActionResult(parent, result, `filled ${fields.length} field(s)`);
@@ -45,7 +67,9 @@ export function registerBrowserFormWaitEvalCommands(
     .command("wait")
     .description("Wait for time, selector, URL, load state, or JS conditions")
     .argument("[selector]", "CSS selector to wait for (visible)")
-    .option("--time <ms>", "Wait for N milliseconds", (v: string) => Number(v))
+    .option("--time <ms>", "Wait for N milliseconds", (v: string) =>
+      parseBrowserNonNegativeIntegerOption(v, "--time"),
+    )
     .option("--text <value>", "Wait for text to appear")
     .option("--text-gone <value>", "Wait for text to disappear")
     .option("--url <pattern>", "Wait for URL (supports globs like **/dash)")
@@ -54,34 +78,40 @@ export function registerBrowserFormWaitEvalCommands(
     .option(
       "--timeout-ms <ms>",
       "How long to wait for each condition (default: 20000)",
-      (v: string) => Number(v),
+      (v: string) => parseBrowserPositiveIntegerOption(v, "--timeout-ms"),
     )
     .option("--target-id <id>", "CDP target id (or unique prefix)")
     .action(async (selector: string | undefined, opts, cmd) => {
       const { parent, profile } = resolveBrowserActionContext(cmd, parentOpts);
       try {
-        const sel = selector?.trim() || undefined;
-        const load =
-          opts.load === "load" || opts.load === "domcontentloaded" || opts.load === "networkidle"
-            ? (opts.load as "load" | "domcontentloaded" | "networkidle")
-            : undefined;
+        const sel = normalizeOptionalString(selector);
+        const load = parseBrowserWaitLoadState(opts.load);
         const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : undefined;
+        const timeMs = Number.isFinite(opts.time) ? opts.time : undefined;
+        const text = normalizeOptionalString(opts.text);
+        const textGone = normalizeOptionalString(opts.textGone);
+        const url = normalizeOptionalString(opts.url);
+        const fn = normalizeOptionalString(opts.fn);
+        const waitConditionCount = [text, textGone, sel, url, load, fn].filter(Boolean).length;
+        const outerTimeoutBaseMs =
+          (timeMs ?? 0) + waitConditionCount * (timeoutMs ?? DEFAULT_WAIT_CONDITION_TIMEOUT_MS) ||
+          undefined;
         const result = await callBrowserAct<{ result?: unknown }>({
           parent,
           profile,
           body: {
             kind: "wait",
-            timeMs: Number.isFinite(opts.time) ? opts.time : undefined,
-            text: opts.text?.trim() || undefined,
-            textGone: opts.textGone?.trim() || undefined,
+            timeMs,
+            text,
+            textGone,
             selector: sel,
-            url: opts.url?.trim() || undefined,
+            url,
             loadState: load,
-            fn: opts.fn?.trim() || undefined,
-            targetId: opts.targetId?.trim() || undefined,
+            fn,
+            targetId: normalizeOptionalString(opts.targetId),
             timeoutMs,
           },
-          timeoutMs,
+          timeoutMs: outerTimeoutBaseMs,
         });
         logBrowserActionResult(parent, result, "wait complete");
       } catch (err) {
@@ -95,6 +125,11 @@ export function registerBrowserFormWaitEvalCommands(
     .description("Evaluate a function against the page or a ref")
     .option("--fn <code>", "Function source, e.g. (el) => el.textContent")
     .option("--ref <id>", "Ref from snapshot")
+    .option(
+      "--timeout-ms <ms>",
+      "How long to allow the evaluate function to run (default: 20000)",
+      (v: string) => parseBrowserPositiveIntegerOption(v, "--timeout-ms"),
+    )
     .option("--target-id <id>", "CDP target id (or unique prefix)")
     .action(async (opts, cmd) => {
       const { parent, profile } = resolveBrowserActionContext(cmd, parentOpts);
@@ -104,15 +139,18 @@ export function registerBrowserFormWaitEvalCommands(
         return;
       }
       try {
+        const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : undefined;
         const result = await callBrowserAct<{ result?: unknown }>({
           parent,
           profile,
           body: {
             kind: "evaluate",
             fn: opts.fn,
-            ref: opts.ref?.trim() || undefined,
-            targetId: opts.targetId?.trim() || undefined,
+            ref: normalizeOptionalString(opts.ref),
+            targetId: normalizeOptionalString(opts.targetId),
+            timeoutMs,
           },
+          timeoutMs,
         });
         if (parent?.json) {
           defaultRuntime.writeJson(result);
