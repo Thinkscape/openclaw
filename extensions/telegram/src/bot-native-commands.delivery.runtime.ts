@@ -1,4 +1,5 @@
-import { createChannelReplyPipeline } from "openclaw/plugin-sdk/channel-reply-pipeline";
-import { deliverReplies } from "./bot/delivery.js";
+// Telegram plugin module implements bot native commandselivery behavior.
+import { createChannelMessageReplyPipeline } from "openclaw/plugin-sdk/channel-outbound";
+import { deliverReplies, emitTelegramMessageSentHooks } from "./bot/delivery.js";
 
-export { createChannelReplyPipeline, deliverReplies };
+export { createChannelMessageReplyPipeline, deliverReplies, emitTelegramMessageSentHooks };
