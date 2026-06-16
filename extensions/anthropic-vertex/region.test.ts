@@ -1,3 +1,4 @@
+// Anthropic Vertex tests cover region plugin behavior.
 import { describe, expect, it } from "vitest";
 import { resolveAnthropicVertexRegion, resolveAnthropicVertexRegionFromBaseUrl } from "./api.js";
 
@@ -28,5 +29,11 @@ describe("anthropic vertex region helpers", () => {
     expect(resolveAnthropicVertexRegionFromBaseUrl("https://aiplatform.googleapis.com")).toBe(
       "global",
     );
+  });
+
+  it("does not infer a Vertex region from custom proxy hosts", () => {
+    expect(
+      resolveAnthropicVertexRegionFromBaseUrl("https://proxy.example.com/google/aiplatform"),
+    ).toBeUndefined();
   });
 });
