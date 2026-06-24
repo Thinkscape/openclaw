@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+// Tlon tests cover approval plugin behavior.
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const cryptoMocks = vi.hoisted(() => ({
   randomBytes: vi.fn(),
@@ -10,10 +11,12 @@ vi.mock("node:crypto", () => ({
 
 let generateApprovalId: typeof import("./approval.js").generateApprovalId;
 
-beforeEach(async () => {
-  vi.resetModules();
-  cryptoMocks.randomBytes.mockReset();
+beforeAll(async () => {
   ({ generateApprovalId } = await import("./approval.js"));
+});
+
+beforeEach(() => {
+  cryptoMocks.randomBytes.mockReset();
 });
 
 describe("generateApprovalId", () => {
