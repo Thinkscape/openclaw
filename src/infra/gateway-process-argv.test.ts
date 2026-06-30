@@ -1,3 +1,4 @@
+// Tests gateway process argv parsing for diagnostics.
 import { describe, expect, it } from "vitest";
 import { isGatewayArgv, parseProcCmdline } from "./gateway-process-argv.js";
 
@@ -13,7 +14,7 @@ describe("parseProcCmdline", () => {
 
   it("keeps non-delimited single arguments and drops whitespace-only entries", () => {
     expect(parseProcCmdline(" gateway ")).toEqual(["gateway"]);
-    expect(parseProcCmdline(" \0\t\0 ")).toEqual([]);
+    expect(parseProcCmdline(" \0\t\0 ")).toStrictEqual([]);
   });
 });
 
