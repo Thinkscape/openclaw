@@ -1,14 +1,14 @@
+// Msteams tests cover attachments.helpers plugin behavior.
 import { beforeEach, describe, expect, it } from "vitest";
-import { createPluginRuntimeMock } from "../../../test/helpers/plugins/plugin-runtime-mock.js";
 import type { PluginRuntime } from "../runtime-api.js";
 import {
   buildMSTeamsAttachmentPlaceholder,
   buildMSTeamsGraphMessageUrls,
   buildMSTeamsMediaPayload,
+  resolveMSTeamsInboundAttachmentPresentation,
 } from "./attachments.js";
 import { setMSTeamsRuntime } from "./runtime.js";
 
-const GRAPH_HOST = "graph.microsoft.com";
 const SHAREPOINT_HOST = "contoso.sharepoint.com";
 const TEST_HOST = "x";
 const createUrlForHost = (host: string, pathSegment: string) => `https://${host}/${pathSegment}`;
@@ -30,7 +30,13 @@ type AttachmentPlaceholderInput = Parameters<typeof buildMSTeamsAttachmentPlaceh
 type GraphMessageUrlParams = Parameters<typeof buildMSTeamsGraphMessageUrls>[0];
 type MSTeamsMediaPayload = ReturnType<typeof buildMSTeamsMediaPayload>;
 
-const runtimeStub: PluginRuntime = createPluginRuntimeMock();
+const runtimeStub = {
+  channel: {
+    text: {
+      chunkText: (text: string) => (text ? [text] : []),
+    },
+  },
+} as unknown as PluginRuntime;
 const MEDIA_PLACEHOLDER_IMAGE = "<media:image>";
 const MEDIA_PLACEHOLDER_DOCUMENT = "<media:document>";
 const formatImagePlaceholder = (count: number) =>
@@ -178,12 +184,107 @@ describe("msteams attachment helpers", () => {
     it.each(ATTACHMENT_PLACEHOLDER_CASES)("$label", ({ attachments, expected }) => {
       expect(buildMSTeamsAttachmentPlaceholder(attachments)).toBe(expected);
     });
+
+    it("respects inline image limits when counting placeholder images", () => {
+      const attachments = [
+        {
+          contentType: "text/html",
+          content: `<img src="data:image/png;base64,${"A".repeat(16)}" />`,
+        },
+      ];
+
+      expect(
+        buildMSTeamsAttachmentPlaceholder(attachments, {
+          maxInlineBytes: 4,
+          maxInlineTotalBytes: 4,
+        }),
+      ).toBe("<media:document>");
+    });
+
+    it("counts advertised files without URLs and ignores mention-only HTML", () => {
+      expect(
+        resolveMSTeamsInboundAttachmentPresentation([
+          { contentType: "application/pdf", name: "report.pdf" },
+        ]),
+      ).toEqual({ placeholder: "<media:document>", expectedMediaCount: 1 });
+      expect(
+        resolveMSTeamsInboundAttachmentPresentation([
+          { contentType: "text/html", content: "<div><at>Bot</at> hello</div>" },
+        ]),
+      ).toEqual({ placeholder: "", expectedMediaCount: 0 });
+    });
+
+    it("does not count HTML references separately from files or cards", () => {
+      expect(
+        resolveMSTeamsInboundAttachmentPresentation([
+          createHtmlAttachment('<attachment id="file-1"></attachment>'),
+          {
+            id: "file-1",
+            contentType: CONTENT_TYPE_APPLICATION_PDF,
+            contentUrl: TEST_URL_PDF,
+          },
+        ]),
+      ).toEqual({ placeholder: "<media:document>", expectedMediaCount: 1 });
+
+      expect(
+        resolveMSTeamsInboundAttachmentPresentation([
+          createHtmlAttachment('<attachment id="card-1"></attachment>'),
+          {
+            id: "card-1",
+            contentType: "application/vnd.microsoft.card.adaptive",
+            content: { type: "AdaptiveCard" },
+          },
+        ]),
+      ).toEqual({ placeholder: "", expectedMediaCount: 0 });
+    });
+
+    it("counts repeated inline URLs once while keeping data images per occurrence", () => {
+      const repeatedUrl = "https://example.com/repeated.png";
+      expect(
+        resolveMSTeamsInboundAttachmentPresentation([
+          {
+            contentType: "text/html",
+            content: `<img src="${repeatedUrl}"><img src="${repeatedUrl}">`,
+          },
+        ]),
+      ).toEqual({ placeholder: "<media:image>", expectedMediaCount: 1 });
+
+      const dataUrl = "data:image/png;base64,AQ==";
+      expect(
+        resolveMSTeamsInboundAttachmentPresentation([
+          {
+            contentType: "text/html",
+            content: `<img src="${dataUrl}"><img src="${dataUrl}">`,
+          },
+        ]),
+      ).toEqual({ placeholder: "<media:image> (2 images)", expectedMediaCount: 2 });
+    });
   });
 
   describe("buildMSTeamsGraphMessageUrls", () => {
     it.each(GRAPH_URL_EXPECTATION_CASES)("$label", ({ params, expectedPath }) => {
       const urls = buildMSTeamsGraphMessageUrls(params);
       expect(urls[0]).toContain(expectedPath);
+    });
+
+    it("uses resolved Graph chat ID for personal DMs instead of Bot Framework a: ID", () => {
+      const urls = buildMSTeamsGraphMessageUrls({
+        conversationType: "personal",
+        conversationId: "19:real-graph-chat-id@unq.gbl.spaces",
+        messageId: "msg-1",
+      });
+      expect(urls).toHaveLength(1);
+      expect(urls[0]).toContain("/chats/19%3Areal-graph-chat-id%40unq.gbl.spaces/messages/msg-1");
+    });
+
+    it("still builds URLs when a: conversation ID is passed (caller did not resolve)", () => {
+      const urls = buildMSTeamsGraphMessageUrls({
+        conversationType: "personal",
+        conversationId: "a:1dRsHCobZ1AxURzY",
+        messageId: "msg-1",
+      });
+      expect(urls).toHaveLength(1);
+      expect(urls[0]).toContain("/chats/a%3A1dRsHCobZ1AxURzY/messages/msg-1");
     });
   });
 
