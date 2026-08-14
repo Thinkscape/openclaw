@@ -1,4 +1,6 @@
+// Slack tests cover probe plugin behavior.
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { probeSlack } from "./probe.js";
 
 const authTestMock = vi.hoisted(() => vi.fn());
 const createSlackWebClientMock = vi.hoisted(() => vi.fn());
@@ -8,15 +10,20 @@ vi.mock("./client.js", () => ({
   createSlackWebClient: createSlackWebClientMock,
 }));
 
-vi.mock("openclaw/plugin-sdk/text-runtime", () => ({
+vi.mock("openclaw/plugin-sdk/text-utility-runtime", () => ({
   withTimeout: withTimeoutMock,
 }));
 
-let probeSlack: typeof import("./probe.js").probeSlack;
+function requireFirstTimeoutCall() {
+  const [call] = withTimeoutMock.mock.calls;
+  if (!call) {
+    throw new Error("expected withTimeout call");
+  }
+  return call;
+}
 
 describe("probeSlack", () => {
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeEach(() => {
     authTestMock.mockReset();
     createSlackWebClientMock.mockReset();
     withTimeoutMock.mockReset();
@@ -27,7 +34,6 @@ describe("probeSlack", () => {
       },
     });
     withTimeoutMock.mockImplementation(async (promise: Promise<unknown>) => await promise);
-    ({ probeSlack } = await import("./probe.js"));
   });
 
   it("maps Slack auth metadata on success", async () => {
@@ -35,6 +41,7 @@ describe("probeSlack", () => {
     authTestMock.mockResolvedValue({
       ok: true,
       user_id: "U123",
+      bot_id: "B123",
       user: "openclaw-bot",
       team_id: "T123",
       team: "OpenClaw",
@@ -48,7 +55,29 @@ describe("probeSlack", () => {
       team: { id: "T123", name: "OpenClaw" },
     });
     expect(createSlackWebClientMock).toHaveBeenCalledWith("xoxb-test");
-    expect(withTimeoutMock).toHaveBeenCalledWith(expect.any(Promise), 2500);
+    expect(withTimeoutMock).toHaveBeenCalledTimes(1);
+    const [promise, timeoutMs] = requireFirstTimeoutCall();
+    expect(promise).toBeInstanceOf(Promise);
+    expect(timeoutMs).toBe(2500);
+  });
+
+  it("warns when auth.test looks like a user token in the bot token slot", async () => {
+    vi.spyOn(Date, "now").mockReturnValueOnce(100).mockReturnValueOnce(145);
+    authTestMock.mockResolvedValue({
+      ok: true,
+      user_id: "UUSER",
+      user: "human-installer",
+      team_id: "T123",
+      team: "OpenClaw",
+    });
+
+    await expect(probeSlack("xoxp-user-token", 2500, { accountId: "work" })).resolves.toMatchObject(
+      {
+        ok: true,
+        warning:
+          'Slack auth.test identified account "work" as user UUSER without bot_id. channels.slack.accounts.work.botToken appears to contain a user token; replace it with a Bot User OAuth Token. Until replaced, explicit bot-mention detection is disabled and required-mention channels fail closed.',
+      },
+    );
   });
 
   it("keeps optional auth metadata fields undefined when Slack omits them", async () => {

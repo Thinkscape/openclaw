@@ -1,3 +1,4 @@
+// Browser tests cover server lifecycle plugin behavior.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { stopOpenClawChromeMock } = vi.hoisted(() => ({
@@ -18,27 +19,12 @@ vi.mock("./server-context.js", () => ({
   listKnownProfileNames: listKnownProfileNamesMock,
 }));
 
-let ensureExtensionRelayForProfiles: typeof import("./server-lifecycle.js").ensureExtensionRelayForProfiles;
-let stopKnownBrowserProfiles: typeof import("./server-lifecycle.js").stopKnownBrowserProfiles;
+const { stopKnownBrowserProfiles } = await import("./server-lifecycle.js");
 
-beforeEach(async () => {
-  vi.resetModules();
-  ({ ensureExtensionRelayForProfiles, stopKnownBrowserProfiles } =
-    await import("./server-lifecycle.js"));
+beforeEach(() => {
   createBrowserRouteContextMock.mockClear();
   listKnownProfileNamesMock.mockClear();
   stopOpenClawChromeMock.mockClear();
-});
-
-describe("ensureExtensionRelayForProfiles", () => {
-  it("is a no-op after removing the Chrome extension relay path", async () => {
-    await expect(
-      ensureExtensionRelayForProfiles({
-        resolved: { profiles: {} } as never,
-        onWarn: vi.fn(),
-      }),
-    ).resolves.toBeUndefined();
-  });
 });
 
 describe("stopKnownBrowserProfiles", () => {

@@ -1,54 +1,50 @@
 ---
-summary: "CLI reference for `openclaw flows` (list, inspect, cancel)"
+summary: "Redirect: flow commands live under `openclaw tasks flow`"
 read_when:
-  - You want to inspect or cancel a flow
-  - You want to see how background tasks roll up into a higher-level job
-title: "flows"
+  - You encounter `openclaw flows` in older docs or release notes
+  - You want a quick TaskFlow inspection reference
+title: "Flows (redirect)"
 ---
 
-# `openclaw flows`
+# `openclaw tasks flow`
 
-Inspect and manage [ClawFlow](/automation/clawflow) jobs.
+There is no top-level `openclaw flows` command. Durable TaskFlow inspection lives under `openclaw tasks flow`.
 
-```bash
-openclaw flows list
-openclaw flows show <lookup>
-openclaw flows cancel <lookup>
-```
-
-## Commands
-
-### `flows list`
-
-List tracked flows and their task counts.
+## Subcommands
 
 ```bash
-openclaw flows list
-openclaw flows list --status blocked
-openclaw flows list --json
+openclaw tasks flow list   [--json] [--status <name>]
+openclaw tasks flow show   <lookup> [--json]
+openclaw tasks flow cancel <lookup>
 ```
 
-### `flows show`
+| Subcommand | Description                | Arguments / options                                                                   |
+| ---------- | -------------------------- | ------------------------------------------------------------------------------------- |
+| `list`     | List tracked TaskFlows.    | `--json` machine-readable output; `--status <name>` filter (see status values below). |
+| `show`     | Show one TaskFlow.         | `<lookup>` flow id or owner key; `--json` machine-readable output.                    |
+| `cancel`   | Cancel a running TaskFlow. | `<lookup>` flow id or owner key.                                                      |
 
-Show one flow by flow id or owner session key.
+`<lookup>` accepts either a flow id (returned by `list` / `show`) or the flow's owner key (the stable identifier the owning subsystem uses to track the flow).
+
+### Status filter values
+
+`--status` on `list` accepts one of: `queued`, `running`, `waiting`, `blocked`, `succeeded`, `failed`, `cancelled`, `lost`.
+
+## Examples
 
 ```bash
-openclaw flows show <lookup>
-openclaw flows show <lookup> --json
+openclaw tasks flow list
+openclaw tasks flow list --status running
+openclaw tasks flow list --json
+openclaw tasks flow show flow_abc123
+openclaw tasks flow show flow_abc123 --json
+openclaw tasks flow cancel flow_abc123
 ```
 
-The output includes the flow status, current step, wait target, blocked summary when present, stored output keys, and linked tasks.
-
-### `flows cancel`
-
-Cancel a flow and any active child tasks.
-
-```bash
-openclaw flows cancel <lookup>
-```
+For TaskFlow concepts and authoring, see [TaskFlow](/automation/taskflow). For the parent `tasks` command, see [tasks CLI reference](/cli/tasks).
 
 ## Related
 
-- [ClawFlow](/automation/clawflow) — job-level orchestration above tasks
-- [Background Tasks](/automation/tasks) — detached work ledger
-- [CLI reference](/cli/index) — full command tree
+- [CLI reference](/cli)
+- [Automation](/automation)
+- [TaskFlow](/automation/taskflow)
