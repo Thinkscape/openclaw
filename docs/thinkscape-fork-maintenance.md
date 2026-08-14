@@ -18,6 +18,13 @@ thinkscape/patches/0004-skill-prompt-path-alias.patch
 
 The release-sync workflow creates disposable release branches from upstream release tags, preserves fork maintenance files, applies the patch queue with `git am --3way`, regenerates schema artifacts, runs targeted validation, tags the patched release, and dispatches the Docker release workflow.
 
+### Correction release tags
+
+Upstream may publish a numeric correction tag such as `v2026.7.1-2` while
+keeping `package.json.version` at `2026.7.1`. The sync accepts this release
+shape, keeps the package version aligned with the upstream source, publishes
+the image with the full correction tag, and advances `latest`.
+
 ## Why patches live on `main`
 
 The default branch is the source of truth for maintenance automation: workflows, release scripts, docs, and patch files. This keeps the moving parts visible in ordinary PRs and lets GitHub Actions read the patch queue directly from the workflow checkout.

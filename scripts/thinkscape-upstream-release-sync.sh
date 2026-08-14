@@ -13,6 +13,7 @@ SYNC_DRY_RUN="${SYNC_DRY_RUN:-0}"
 COPILOT_ASSIGNMENT_TOKEN="${COPILOT_ASSIGNMENT_TOKEN:-}"
 WORKFLOW_POLL_SECONDS="${WORKFLOW_POLL_SECONDS:-30}"
 WORKFLOW_MAX_POLLS="${WORKFLOW_MAX_POLLS:-240}"
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/thinkscape-release-tags.sh"
 
 log() {
   printf '[release-sync] %s\n' "$*"
@@ -86,9 +87,11 @@ fail_with_issue() {
 verify_version_alignment() {
   local upstream_commit="$1"
   local release_tag="$2"
-  local expected="${release_tag#v}"
+  local tag_version="${release_tag#v}"
+  local expected
   local actual
 
+  expected="$(thinkscape_release_package_version "${release_tag}")"
   actual="$(git show "${upstream_commit}:package.json" | jq -r '.version')"
   if [[ "${actual}" != "${expected}" ]]; then
     local detail_file
@@ -98,18 +101,18 @@ Upstream release/version mismatch detected.
 
 - upstream repo: ${UPSTREAM_REPO}
 - release tag: ${release_tag}
-- expected version from tag: ${expected}
+- release tag version: ${tag_version}
+- expected package.json version: ${expected}
 - package.json version at upstream commit ${upstream_commit}: ${actual}
 
-The automation intentionally refuses to publish a forked image when the upstream
-release tag and package.json version diverge.
+Numeric correction release tags intentionally keep package.json at the base
+release version; all other supported release tags must match package.json.
 EOF
     fail_with_issue "version alignment" "${release_tag}" "${detail_file}"
   fi
 
   printf '%s\n' "${actual}"
 }
-
 cancel_inflight_docker_release_runs() {
   local runs run_id
   runs="$(gh run list \
@@ -222,7 +225,7 @@ EOF
     fail_with_issue "published image verification" "v${version}" "${detail_file}"
   fi
 
-  if [[ "${version}" =~ ^[0-9]{4}\.[1-9][0-9]*\.[1-9][0-9]*(-beta\.[1-9][0-9]*)?$ ]]; then
+  if thinkscape_is_latest_release_version "${version}"; then
     version_digest="$(docker buildx imagetools inspect "${TARGET_IMAGE}:${version}" | sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)"
     latest_digest="$(docker buildx imagetools inspect "${TARGET_IMAGE}:latest" | sed -n 's/^Digest:[[:space:]]*//p' | head -n 1)"
     if [[ -z "${version_digest}" || -z "${latest_digest}" || "${version_digest}" != "${latest_digest}" ]]; then
@@ -262,7 +265,7 @@ main() {
   if [[ -z "${release_tag}" ]]; then
     release_tag="$(latest_upstream_release_tag)"
   fi
-  if [[ -z "${release_tag}" || "${release_tag}" != v* ]]; then
+  if [[ -z "${release_tag}" ]] || ! thinkscape_is_supported_release_tag "${release_tag}"; then
     printf 'invalid release tag: %s\n' "${release_tag}" >&2
     exit 1
   fi
@@ -380,4 +383,6 @@ main() {
   log "Release ${release_tag} published successfully as ${TARGET_IMAGE}:${release_version} and :latest"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
