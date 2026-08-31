@@ -2,12 +2,16 @@ import { expectDefined } from "@openclaw/normalization-core";
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createSubagentSpawnTestConfig,
   loadSubagentSpawnModuleForTest,
   setupAcceptedSubagentGatewayMock,
 } from "./subagent-spawn.test-helpers.js";
 
-type SessionStore = Record<string, Record<string, unknown>>;
-type GatewayRequest = { method?: string; params?: Record<string, unknown> };
+type GatewayRequest = {
+  method?: string;
+  params?: Record<string, unknown>;
+  timeoutMs?: number;
+};
 
 describe("sessions_spawn context modes", () => {
   const storePath = "/tmp/subagent-context-session-store.json";
@@ -18,6 +22,7 @@ describe("sessions_spawn context modes", () => {
   const forkSessionFromParentMock = vi.fn();
   const ensureContextEnginesInitializedMock = vi.fn();
   const resolveContextEngineMock = vi.fn();
+  let gatewayTimeoutMs: number | undefined;
   let spawnSubagentDirect: Awaited<
     ReturnType<typeof loadSubagentSpawnModuleForTest>
   >["spawnSubagentDirect"];
@@ -31,6 +36,15 @@ describe("sessions_spawn context modes", () => {
       forkSessionFromParentMock,
       ensureContextEnginesInitializedMock,
       resolveContextEngineMock,
+      getRuntimeConfig: () =>
+        createSubagentSpawnTestConfig(undefined, {
+          agents: {
+            defaults: {
+              workspace: "/tmp",
+              subagents: { gatewayTimeoutMs },
+            },
+          },
+        }),
       sessionStorePath: storePath,
     }));
   });
@@ -43,6 +57,7 @@ describe("sessions_spawn context modes", () => {
     forkSessionFromParentMock.mockReset();
     ensureContextEnginesInitializedMock.mockReset();
     resolveContextEngineMock.mockReset();
+    gatewayTimeoutMs = undefined;
     setupAcceptedSubagentGatewayMock(callGatewayMock);
     resolveContextEngineMock.mockResolvedValue({});
   });
@@ -361,6 +376,7 @@ describe("sessions_spawn context modes", () => {
     }));
     const prepareSubagentSpawn = vi.fn(async () => undefined);
     resolveContextEngineMock.mockResolvedValue({ prepareSubagentSpawn });
+    gatewayTimeoutMs = 300_000;
 
     const result = await spawnSubagentDirect(
       { task: "spin this into a thread", thread: true },
@@ -384,6 +400,7 @@ describe("sessions_spawn context modes", () => {
     expect(cleanupRequest.params?.key).toBe(result.childSessionKey);
     expect(cleanupRequest.params?.deleteTranscript).toBe(true);
     expect(cleanupRequest.params?.emitLifecycleHooks).toBe(false);
+    expect(cleanupRequest.timeoutMs).toBe(300_000);
     expect(prepareSubagentSpawn).not.toHaveBeenCalled();
   });
 
