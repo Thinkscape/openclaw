@@ -1,6 +1,9 @@
+import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { describe, expect, it, vi } from "vitest";
 import {
+  cleanupFailedSpawnBeforeAgentStart,
   cleanupProvisionalSession,
+  resolveSubagentCleanupGatewayTimeoutMs,
   terminateAcceptedCollectorRun,
 } from "./subagent-spawn-cleanup.js";
 
@@ -11,6 +14,65 @@ function sessionChangedError(): Error {
     details: { reason: "session-changed" },
   });
 }
+
+describe("subagent cleanup gateway timeout", () => {
+  it("defaults to 60 seconds and clamps configured values to a timer-safe delay", () => {
+    expect(resolveSubagentCleanupGatewayTimeoutMs(undefined)).toBe(60_000);
+    expect(resolveSubagentCleanupGatewayTimeoutMs(300_000)).toBe(300_000);
+    expect(resolveSubagentCleanupGatewayTimeoutMs(Number.MAX_SAFE_INTEGER)).toBe(
+      MAX_TIMER_TIMEOUT_MS,
+    );
+  });
+
+  it("forwards a configured timeout to cleanup control calls", async () => {
+    const callGateway = vi.fn().mockResolvedValue({ deleted: true });
+
+    await cleanupProvisionalSession("agent:main:subagent:child", {
+      expectedSessionId: "session-id",
+      expectedLifecycleRevision: "session-revision",
+      callGateway,
+      timeoutMs: 300_000,
+    });
+
+    expect(callGateway).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "sessions.delete", timeoutMs: 300_000 }),
+    );
+  });
+
+  it("forwards a configured timeout through failed-spawn cleanup", async () => {
+    const callGateway = vi.fn().mockResolvedValue({ deleted: true });
+
+    await cleanupFailedSpawnBeforeAgentStart({
+      childSessionKey: "agent:main:subagent:child",
+      expectedSessionId: "session-id",
+      expectedLifecycleRevision: "session-revision",
+      callGateway,
+      timeoutMs: 300_000,
+    });
+
+    expect(callGateway).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "sessions.delete", timeoutMs: 300_000 }),
+    );
+  });
+
+  it("forwards a configured timeout through accepted collector termination", async () => {
+    const callGateway = vi.fn().mockResolvedValue({
+      aborted: true,
+      runIds: ["gateway-run"],
+    });
+
+    await terminateAcceptedCollectorRun({
+      childSessionKey: "agent:main:subagent:child",
+      gatewayRunId: "gateway-run",
+      callGateway,
+      timeoutMs: 300_000,
+    });
+
+    expect(callGateway).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "chat.abort", timeoutMs: 300_000 }),
+    );
+  });
+});
 
 describe("subagent spawn cleanup identity", () => {
   it("requires both frozen session identities before deletion", async () => {

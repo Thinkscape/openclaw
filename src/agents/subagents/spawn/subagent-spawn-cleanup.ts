@@ -1,11 +1,18 @@
 import { promises as fs } from "node:fs";
+import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 import type { callGateway } from "../../../gateway/call.js";
 import { isFastTestRuntimeEnv } from "../../../infra/env.js";
 import { deleteSubagentSessionForCleanup } from "../registry/subagent-session-cleanup.js";
 import { callSubagentGateway } from "./subagent-spawn-gateway.js";
 
 const SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS = 60_000;
+
+export function resolveSubagentCleanupGatewayTimeoutMs(value: number | undefined): number {
+  return resolveTimerTimeoutMs(value, SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS, 1);
+}
+
 type GatewayCall = (options: Parameters<typeof callGateway>[0]) => Promise<unknown>;
+
 function isMatchingAbortResponse(response: unknown, gatewayRunId: string): boolean {
   if (!response || typeof response !== "object") {
     return false;
@@ -90,6 +97,8 @@ export async function cleanupFailedSpawnBeforeAgentStart(params: {
   waitForSessionDeletion?: boolean;
   expectedSessionId?: string;
   expectedLifecycleRevision?: string;
+  callGateway?: GatewayCall;
+  timeoutMs?: number;
 }): Promise<{ attachmentsRemoved: boolean; sessionDeleted: boolean }> {
   const { childSessionKey, attachmentAbsDir, waitForSessionDeletion, ...sessionCleanupOptions } =
     params;

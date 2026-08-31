@@ -40,6 +40,7 @@ import {
   cleanupFailedSpawnBeforeAgentStart,
   cleanupProvisionalSession,
   retrySubagentCleanup,
+  resolveSubagentCleanupGatewayTimeoutMs,
   terminateAcceptedCollectorRun,
 } from "./subagent-spawn-cleanup.js";
 import {
@@ -141,6 +142,9 @@ export async function spawnSubagentDirect(
     },
     childIdem,
   } = requestResolution.resolved;
+  const gatewayTimeoutMs = resolveSubagentCleanupGatewayTimeoutMs(
+    cfg.agents?.defaults?.subagents?.gatewayTimeoutMs,
+  );
   let modelApplied = false;
   let threadBindingReady = false;
   let hasBoundThreadDeliveryOrigin = false;
@@ -212,6 +216,7 @@ export async function spawnSubagentDirect(
         emitLifecycleHooks,
         deleteTranscript: true,
         ...provisionalSessionIdentity,
+        timeoutMs: gatewayTimeoutMs,
       });
     const preparedSpawnContext = await prepareSubagentSessionContext({
       cfg,
@@ -422,6 +427,7 @@ export async function spawnSubagentDirect(
         emitLifecycleHooks: threadBindingReady,
         deleteTranscript: true,
         ...provisionalSessionIdentity,
+        timeoutMs: gatewayTimeoutMs,
         waitForSessionDeletion,
       });
     type SubagentBackendState = { contextEnginePreparation?: SubagentSpawnPreparation };
@@ -476,6 +482,7 @@ export async function spawnSubagentDirect(
             childSessionKey,
             gatewayRunId: acceptedChildRunId,
             ...provisionalSessionIdentity,
+            timeoutMs: gatewayTimeoutMs,
           });
         }
         await rollbackPreparedContextEngine(state?.contextEnginePreparation);
@@ -629,6 +636,7 @@ export async function spawnSubagentDirect(
                 childSessionKey,
                 gatewayRunId,
                 ...provisionalSessionIdentity,
+                timeoutMs: gatewayTimeoutMs,
               });
               launchTerminationConfirmed = true;
               throw error;
