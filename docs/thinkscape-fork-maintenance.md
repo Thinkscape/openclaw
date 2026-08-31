@@ -9,14 +9,12 @@ Fork-specific source changes live in an explicit patch queue on the fork's defau
 ```text
 thinkscape/patches/series
 thinkscape/patches/0001-subagent-gateway-timeout.patch
-thinkscape/patches/0002-session-write-lock-config.patch
-thinkscape/patches/0003-sandbox-no-new-privileges.patch
-thinkscape/patches/0004-skill-prompt-path-alias.patch
+thinkscape/patches/0002-sandbox-allow-disable-no-new-privileges.patch
 ```
 
 `series` is the ordered list of patches to apply. Blank lines and `#` comments are ignored.
 
-The release-sync workflow creates disposable release branches from upstream release tags, preserves fork maintenance files, applies the patch queue with `git am --3way`, regenerates schema artifacts, runs targeted validation, tags the patched release, and dispatches the Docker release workflow.
+The release-sync workflow creates disposable release branches from upstream release tags, preserves fork maintenance files, applies the patch queue with `git am --3way`, regenerates schema artifacts, runs targeted validation, tags the patched release, and dispatches the Docker release workflow. Automated dispatches from `github-actions[bot]` bypass the manual `docker-release` environment approval; human backfills remain gated.
 
 ### Correction release tags
 
@@ -58,6 +56,7 @@ Release branches are generated outputs. Do not hand-maintain release branches ex
 - Add a patch by writing a numbered `*.patch` file and adding it to `thinkscape/patches/series`.
 - Remove a patch by deleting its file and removing it from `series`.
 - Keep patch filenames stable unless the patch's purpose changes.
+- Update the targeted test paths in `scripts/thinkscape-upstream-release-sync.sh` whenever the patch queue changes or upstream moves the covered tests.
 - Prefer upstream PRs or plugin/config extension points over permanent fork patches.
 
 ## Generated files

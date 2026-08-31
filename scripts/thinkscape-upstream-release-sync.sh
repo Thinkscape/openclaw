@@ -76,6 +76,11 @@ fail_with_issue() {
   local phase="$1"
   local release_tag="$2"
   local detail_file="$3"
+  if [[ "${SYNC_DRY_RUN}" == "1" ]]; then
+    printf 'Dry-run %s failed for %s; no issue was created.\n' "${phase}" "${release_tag}" >&2
+    cat "${detail_file}" >&2
+    exit 1
+  fi
   local title issue_number
   title="[release-sync] ${release_tag}: ${phase} failed"
   issue_number="$(open_or_update_issue "${title}" "${detail_file}")"
@@ -113,24 +118,6 @@ EOF
 
   printf '%s\n' "${actual}"
 }
-cancel_inflight_docker_release_runs() {
-  local runs run_id
-  runs="$(gh run list \
-    --repo "${FORK_REPO}" \
-    --workflow "Docker Release" \
-    --limit 20 \
-    --json databaseId,status \
-    --jq '.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending") | .databaseId')"
-  if [[ -z "${runs}" ]]; then
-    return 0
-  fi
-  while IFS= read -r run_id; do
-    [[ -z "${run_id}" ]] && continue
-    log "Cancelling in-flight Docker Release run ${run_id}"
-    gh run cancel "${run_id}" --repo "${FORK_REPO}" >/dev/null || true
-  done <<<"${runs}"
-}
-
 dispatch_docker_release() {
   local release_tag="$1"
   local dispatched_at="$2"
@@ -138,17 +125,19 @@ dispatch_docker_release() {
     --repo "${FORK_REPO}" \
     --ref "${DEFAULT_BRANCH}" \
     -f "tag=${release_tag}" \
+    -f "release_sync=true" \
     >/dev/null
 
   local run_id=""
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 60); do
     run_id="$(gh run list \
       --repo "${FORK_REPO}" \
       --workflow "Docker Release" \
       --event workflow_dispatch \
       --limit 20 \
-      --json databaseId,createdAt | \
-      jq -r --arg after "${dispatched_at}" 'map(select(.createdAt >= $after)) | sort_by(.createdAt) | last.databaseId // empty')"
+      --json databaseId,createdAt,headBranch | \
+      jq -r --arg branch "${DEFAULT_BRANCH}" --arg after "${dispatched_at}" \
+        'map(select(.headBranch == $branch and .createdAt >= $after)) | sort_by(.createdAt) | last.databaseId // empty')"
     if [[ -n "${run_id}" ]]; then
       printf '%s\n' "${run_id}"
       return 0
@@ -159,7 +148,7 @@ dispatch_docker_release() {
   local detail_file
   detail_file="$(mktemp)"
   cat >"${detail_file}" <<EOF
-Timed out waiting for Docker Release workflow run to appear after dispatch.
+Timed out waiting for the automated Docker Release workflow dispatch.
 
 - release tag: ${release_tag}
 - dispatched_at: ${dispatched_at}
@@ -352,11 +341,24 @@ main() {
   pnpm install --frozen-lockfile
   pnpm config:schema:gen
   # Keep release validation scoped to the fork-managed patch surfaces.
-  # The broader loadConfig/temp-home suites have upstream hangs on v2026.4.5
-  # and are not specific to the release patch set being applied here.
-  node scripts/test-projects.mjs \
-    src/config/zod-schema.session-maintenance-extensions.test.ts \
-    src/agents/session-write-lock.test.ts
+  # The test-projects entrypoint changed from .mjs to .mts in v2026.8.1.
+  if [[ -f scripts/test-projects.mts ]]; then
+    node --import ./scripts/tsx.mjs scripts/test-projects.mts \
+      src/config/config.agent-concurrency-defaults.test.ts \
+      src/config/zod-schema.agent-defaults.test.ts \
+      src/agents/subagents/spawn/subagent-spawn-cleanup.test.ts \
+      src/agents/subagents/spawn/subagent-spawn.context.test.ts \
+      src/config/config.sandbox-docker.test.ts \
+      src/agents/sandbox-create-args.test.ts
+  else
+    node scripts/test-projects.mjs \
+      src/config/config.agent-concurrency-defaults.test.ts \
+      src/config/zod-schema.agent-defaults.test.ts \
+      src/agents/subagents/spawn/subagent-spawn-cleanup.test.ts \
+      src/agents/subagents/spawn/subagent-spawn.context.test.ts \
+      src/config/config.sandbox-docker.test.ts \
+      src/agents/sandbox-create-args.test.ts
+  fi
 
   if ! git diff --quiet || ! git diff --cached --quiet; then
     git add -A
@@ -364,7 +366,7 @@ main() {
   fi
 
   if [[ "${SYNC_DRY_RUN}" == "1" ]]; then
-    log "Dry run complete; not pushing branch/tag or dispatching Docker Release"
+    log "Dry run complete; not pushing refs or triggering Docker Release"
     exit 0
   fi
 
@@ -372,11 +374,10 @@ main() {
   git tag -f -a "${release_tag}" -m "Release ${release_tag} for Thinkscape fork with automation-managed patches"
   git push origin "refs/tags/${release_tag}" --force
 
-  cancel_inflight_docker_release_runs
   local dispatched_at run_id
   dispatched_at="$(iso_now)"
   run_id="$(dispatch_docker_release "${release_tag}" "${dispatched_at}")"
-  log "Watching Docker Release run ${run_id}"
+  log "Watching automated Docker Release run ${run_id}"
   wait_for_run_completion "${run_id}" "${release_tag}"
   verify_published_images "${release_version}"
 

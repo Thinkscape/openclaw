@@ -1,24 +1,20 @@
 name: Docker Release
 
 on:
-  push:
-    tags:
-      - "v*"
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - "**/*.mdx"
-      - ".agents/**"
-      - "skills/**"
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to backfill (for example v2026.3.22)
+        description: Release tag to publish (for example v2026.8.1)
         required: true
         type: string
+      release_sync:
+        description: Internal release-sync dispatch; only github-actions[bot] may bypass manual approval
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('docker-release-manual-{0}', inputs.tag) || format('docker-release-push-{0}', github.run_id) }}
+  group: ${{ format('docker-release-{0}', inputs.tag) }}
   cancel-in-progress: false
 
 env:
@@ -57,9 +53,9 @@ jobs:
           fetch-depth: 0
 
   approve_manual_backfill:
-    if: github.event_name == 'workflow_dispatch'
+    if: ${{ github.event_name == 'workflow_dispatch' && !(inputs.release_sync && github.actor == 'github-actions[bot]') }}
     needs: validate_manual_backfill
-    # WARNING: KEEP MANUAL BACKFILLS GATED BY THE docker-release ENVIRONMENT.
+    # Human backfills stay gated; only the repository release-sync workflow bypasses approval.
     runs-on: ubuntu-24.04
     environment: docker-release
     steps:
@@ -73,7 +69,7 @@ jobs:
   # Build amd64 images (default + slim share the build stage cache)
   build-amd64:
     needs: [approve_manual_backfill]
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || needs.approve_manual_backfill.result == 'success') }}
+    if: ${{ always() && ((inputs.release_sync && github.actor == 'github-actions[bot]') || needs.approve_manual_backfill.result == 'success') }}
     # WARNING: DO NOT REVERT THIS TO A BLACKSMITH RUNNER WITHOUT RE-VALIDATING TAG BACKFILLS.
     runs-on: ubuntu-24.04
     permissions:
@@ -194,7 +190,7 @@ jobs:
   # Build arm64 images (default + slim share the build stage cache)
   build-arm64:
     needs: [approve_manual_backfill]
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || needs.approve_manual_backfill.result == 'success') }}
+    if: ${{ always() && ((inputs.release_sync && github.actor == 'github-actions[bot]') || needs.approve_manual_backfill.result == 'success') }}
     # WARNING: DO NOT REVERT THIS TO A BLACKSMITH RUNNER WITHOUT RE-VALIDATING TAG BACKFILLS.
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -312,7 +308,7 @@ jobs:
   # Create multi-platform manifests
   create-manifest:
     needs: [approve_manual_backfill, build-amd64, build-arm64]
-    if: ${{ always() && needs.build-amd64.result == 'success' && needs.build-arm64.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.approve_manual_backfill.result == 'success') }}
+    if: ${{ always() && needs.build-amd64.result == 'success' && needs.build-arm64.result == 'success' && ((inputs.release_sync && github.actor == 'github-actions[bot]') || needs.approve_manual_backfill.result == 'success') }}
     # WARNING: DO NOT REVERT THIS TO A BLACKSMITH RUNNER WITHOUT RE-VALIDATING TAG BACKFILLS.
     runs-on: ubuntu-24.04
     permissions:
@@ -338,7 +334,6 @@ jobs:
         env:
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
-          IS_MANUAL_BACKFILL: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: |
           set -euo pipefail
           IMAGE="${IMAGE,,}"
