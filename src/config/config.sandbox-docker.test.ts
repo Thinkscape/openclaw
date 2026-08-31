@@ -28,6 +28,27 @@ describe("sandbox docker config", () => {
     }
   });
 
+  it("accepts the explicit no-new-privileges dangerous override", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          sandbox: {
+            docker: {
+              dangerouslyDisableNoNewPrivileges: true,
+            },
+          },
+        },
+      },
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(
+        res.config.agents?.defaults?.sandbox?.docker?.dangerouslyDisableNoNewPrivileges,
+      ).toBe(true);
+    }
+  });
+
   it("accepts safe binds array in sandbox.docker config", () => {
     const res = validateConfigObject({
       agents: {
