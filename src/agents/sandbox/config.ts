@@ -36,6 +36,7 @@ import type {
 } from "./types.js";
 
 export const DANGEROUS_SANDBOX_DOCKER_BOOLEAN_KEYS = [
+  "dangerouslyDisableNoNewPrivileges",
   "dangerouslyAllowReservedContainerTargets",
   "dangerouslyAllowExternalBindSources",
   "dangerouslyAllowContainerNamespaceJoin",
