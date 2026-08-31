@@ -135,9 +135,9 @@ dispatch_docker_release() {
       --workflow "Docker Release" \
       --event workflow_dispatch \
       --limit 20 \
-      --json databaseId,createdAt,headBranch | \
-      jq -r --arg branch "${DEFAULT_BRANCH}" --arg after "${dispatched_at}" \
-        'map(select(.headBranch == $branch and .createdAt >= $after)) | sort_by(.createdAt) | last.databaseId // empty')"
+      --json databaseId,createdAt,displayTitle,headBranch | \
+      jq -r --arg branch "${DEFAULT_BRANCH}" --arg after "${dispatched_at}" --arg title "Docker Release ${release_tag} (release-sync)" \
+        'map(select(.headBranch == $branch and .createdAt >= $after and .displayTitle == $title)) | sort_by(.createdAt) | last.databaseId // empty')"
     if [[ -n "${run_id}" ]]; then
       printf '%s\n' "${run_id}"
       return 0

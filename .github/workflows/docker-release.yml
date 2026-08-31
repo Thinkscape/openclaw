@@ -1,4 +1,5 @@
 name: Docker Release
+run-name: Docker Release ${{ inputs.tag }}${{ inputs.release_sync && ' (release-sync)' || '' }}
 
 on:
   workflow_dispatch:
@@ -68,8 +69,8 @@ jobs:
   # DO NOT MOVE IT BACK TO BLACKSMITH WITHOUT RE-VALIDATING TAG BUILDS AND BACKFILLS.
   # Build amd64 images (default + slim share the build stage cache)
   build-amd64:
-    needs: [approve_manual_backfill]
-    if: ${{ always() && ((inputs.release_sync && github.actor == 'github-actions[bot]') || needs.approve_manual_backfill.result == 'success') }}
+    needs: [validate_manual_backfill, approve_manual_backfill]
+    if: ${{ always() && needs.validate_manual_backfill.result == 'success' && ((inputs.release_sync && github.actor == 'github-actions[bot]') || needs.approve_manual_backfill.result == 'success') }}
     # WARNING: DO NOT REVERT THIS TO A BLACKSMITH RUNNER WITHOUT RE-VALIDATING TAG BACKFILLS.
     runs-on: ubuntu-24.04
     permissions:
@@ -189,8 +190,8 @@ jobs:
 
   # Build arm64 images (default + slim share the build stage cache)
   build-arm64:
-    needs: [approve_manual_backfill]
-    if: ${{ always() && ((inputs.release_sync && github.actor == 'github-actions[bot]') || needs.approve_manual_backfill.result == 'success') }}
+    needs: [validate_manual_backfill, approve_manual_backfill]
+    if: ${{ always() && needs.validate_manual_backfill.result == 'success' && ((inputs.release_sync && github.actor == 'github-actions[bot]') || needs.approve_manual_backfill.result == 'success') }}
     # WARNING: DO NOT REVERT THIS TO A BLACKSMITH RUNNER WITHOUT RE-VALIDATING TAG BACKFILLS.
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -307,8 +308,8 @@ jobs:
 
   # Create multi-platform manifests
   create-manifest:
-    needs: [approve_manual_backfill, build-amd64, build-arm64]
-    if: ${{ always() && needs.build-amd64.result == 'success' && needs.build-arm64.result == 'success' && ((inputs.release_sync && github.actor == 'github-actions[bot]') || needs.approve_manual_backfill.result == 'success') }}
+    needs: [validate_manual_backfill, approve_manual_backfill, build-amd64, build-arm64]
+    if: ${{ always() && needs.validate_manual_backfill.result == 'success' && needs.build-amd64.result == 'success' && needs.build-arm64.result == 'success' && ((inputs.release_sync && github.actor == 'github-actions[bot]') || needs.approve_manual_backfill.result == 'success') }}
     # WARNING: DO NOT REVERT THIS TO A BLACKSMITH RUNNER WITHOUT RE-VALIDATING TAG BACKFILLS.
     runs-on: ubuntu-24.04
     permissions:
