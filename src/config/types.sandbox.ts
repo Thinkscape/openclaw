@@ -48,6 +48,11 @@ export type SandboxDockerSettings = {
   /** Additional bind mounts (host:container:mode format, e.g. ["/host/path:/container/path:rw"]). */
   binds?: string[];
   /**
+   * Dangerous override: disable Docker's no-new-privileges security option.
+   * Default behavior enables no-new-privileges.
+   */
+  dangerouslyDisableNoNewPrivileges?: boolean;
+  /**
    * Dangerous override: allow bind mounts that target reserved container paths
    * like /workspace or /agent.
    */

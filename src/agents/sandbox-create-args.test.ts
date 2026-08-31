@@ -127,6 +127,22 @@ describe("buildSandboxCreateArgs", () => {
     expectFlagValues(args, "--ulimit", ["nofile=1024:2048", "nproc=128", "core=0"]);
   });
 
+  it("omits no-new-privileges only for the exact dangerous true override", () => {
+    for (const dangerouslyDisableNoNewPrivileges of [undefined, false, true] as const) {
+      const cfg = createSandboxConfig({ dangerouslyDisableNoNewPrivileges });
+      const { argv } = buildSandboxCreateArgs({
+        name: "openclaw-sbx-no-new-privileges",
+        cfg,
+        scopeKey: "main",
+        createdAtMs: 1700000000000,
+      });
+
+      expect(valuesForFlag(argv, "--security-opt").includes("no-new-privileges")).toBe(
+        dangerouslyDisableNoNewPrivileges !== true,
+      );
+    }
+  });
+
   it("omits non-finite numeric Docker resource flags", () => {
     const cfg = createSandboxConfig({
       pidsLimit: Number.POSITIVE_INFINITY,
