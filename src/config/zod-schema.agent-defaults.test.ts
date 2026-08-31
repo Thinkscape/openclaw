@@ -214,6 +214,18 @@ describe("agent defaults schema", () => {
     );
   });
 
+  it("accepts a positive subagent cleanup gateway timeout", () => {
+    const defaults = AgentDefaultsSchema.parse({
+      subagents: { gatewayTimeoutMs: 300_000 },
+    });
+
+    expect(defaults?.subagents?.gatewayTimeoutMs).toBe(300_000);
+    expectSchemaFailurePath(
+      AgentDefaultsSchema.safeParse({ subagents: { gatewayTimeoutMs: 0 } }),
+      "subagents.gatewayTimeoutMs",
+    );
+  });
+
   it("accepts subagent delegation mode on defaults and agent entries", () => {
     expectSchemaSuccess(
       AgentDefaultsSchema.safeParse({
