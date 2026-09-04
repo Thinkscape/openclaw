@@ -1,3 +1,5 @@
+// Temp path tests cover plugin SDK temp directory creation and cleanup helpers.
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -5,8 +7,13 @@ import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
 import { buildRandomTempFilePath, withTempDownloadPath } from "./temp-path.js";
 
 function expectPathInsideTmpRoot(resultPath: string) {
-  const tmpRoot = path.resolve(resolvePreferredOpenClawTmpDir());
-  const resolved = path.resolve(resultPath);
+  const tmpRoot = fsSync.realpathSync(resolvePreferredOpenClawTmpDir());
+  let resolved = path.resolve(resultPath);
+  try {
+    resolved = path.join(fsSync.realpathSync(path.dirname(resultPath)), path.basename(resultPath));
+  } catch {
+    // The temp parent is intentionally gone after withTempDownloadPath cleanup.
+  }
   const rel = path.relative(tmpRoot, resolved);
   expect(rel === ".." || rel.startsWith(`..${path.sep}`)).toBe(false);
   expect(resultPath).not.toContain("..");
@@ -51,35 +58,35 @@ describe("buildRandomTempFilePath", () => {
 });
 
 describe("withTempDownloadPath", () => {
-  it("creates a temp path under tmp dir and cleans up the temp directory", async () => {
+  it.each([
+    {
+      name: "creates a temp path under tmp dir and cleans up the temp directory",
+      input: { prefix: "line-media" },
+      expectedBasename: undefined,
+    },
+    {
+      name: "sanitizes prefix and fileName",
+      input: { prefix: "../../channels/../media", fileName: "../../evil.bin" },
+      expectedBasename: "evil.bin",
+    },
+    ...[".", "..", "../..", "-..-"].map((fileName) => ({
+      name: `falls back to the default name for the dot segment ${fileName}`,
+      input: { prefix: "media", fileName },
+      expectedBasename: "download.bin",
+    })),
+  ])("$name", async ({ input, expectedBasename }) => {
     let capturedPath = "";
-    await withTempDownloadPath(
-      {
-        prefix: "line-media",
-      },
-      async (tmpPath) => {
-        capturedPath = tmpPath;
-        await fs.writeFile(tmpPath, "ok");
-      },
-    );
-
-    expect(capturedPath).toContain(path.join(resolvePreferredOpenClawTmpDir(), "line-media-"));
-    await expect(fs.stat(capturedPath)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("sanitizes prefix and fileName", async () => {
-    let capturedPath = "";
-    await withTempDownloadPath(
-      {
-        prefix: "../../channels/../media",
-        fileName: "../../evil.bin",
-      },
-      async (tmpPath) => {
-        capturedPath = tmpPath;
-      },
-    );
+    await withTempDownloadPath(input, async (tmpPath) => {
+      capturedPath = tmpPath;
+      await fs.writeFile(tmpPath, "ok");
+    });
 
     expectPathInsideTmpRoot(capturedPath);
-    expect(path.basename(capturedPath)).toBe("evil.bin");
+    if (expectedBasename) {
+      expect(path.basename(capturedPath)).toBe(expectedBasename);
+    } else {
+      expect(capturedPath).toContain(path.join(resolvePreferredOpenClawTmpDir(), "line-media-"));
+    }
+    await expect(fs.stat(path.dirname(capturedPath))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
